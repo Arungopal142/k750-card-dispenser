@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "card_issues",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "issuedBy", "order": "ASCENDING" },
+        { "fieldPath": "issuedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

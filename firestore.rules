@@ -1,0 +1,112 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: check user is authenticated, active, and get role
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isUserActive() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true;
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && isUserActive() && getUserRole() == 'admin';
+    }
+
+    function isActiveUser() {
+      return isAuthenticated() && isUserActive();
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // ==================== USERS ====================
+    match /users/{userId} {
+      // Read: own doc OR admin
+      allow read: if isOwner(userId) || isAdmin();
+
+      // Create: only own doc (self-registration)
+      allow create: if isOwner(userId);
+
+      // Update: own doc (limited fields) OR admin (any field)
+      allow update: if (isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['role', 'active']))
+        || isAdmin();
+
+      // Delete: admin only
+      allow delete: if isAdmin();
+    }
+
+    // ==================== EMPLOYEES ====================
+    match /employees/{empId} {
+      // Read: any active user
+      allow read: if isActiveUser();
+
+      // Write: admin only
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ==================== CARD ISSUES ====================
+    match /card_issues/{logId} {
+      // Read: own cards OR admin
+      allow read: if isActiveUser() && (
+        resource.data.issuedById == request.auth.uid
+        || isAdmin()
+      );
+
+      // Create: any active user (operator issues card)
+      allow create: if isActiveUser()
+        && request.resource.data.issuedById == request.auth.uid;
+
+      // Update: own card (checkout) OR admin
+      allow update: if isActiveUser() && (
+        resource.data.issuedById == request.auth.uid
+        || isAdmin()
+      );
+
+      // Delete: admin only
+      allow delete: if isAdmin();
+    }
+
+    // ==================== ACTIVITY LOGS ====================
+    match /activity_logs/{logId} {
+      // Read: admin only
+      allow read: if isAdmin();
+
+      // Create: any active user (log their actions)
+      allow create: if isActiveUser();
+
+      // No updates or deletes on logs
+      allow update, delete: if false;
+    }
+
+    // ==================== DEVICE LOGS ====================
+    match /device_logs/{logId} {
+      // Read: admin only
+      allow read: if isAdmin();
+
+      // Create: any active user
+      allow create: if isActiveUser();
+
+      // No updates or deletes
+      allow update, delete: if false;
+    }
+
+    // ==================== SETTINGS ====================
+    match /settings/{docId} {
+      // Read: any active user
+      allow read: if isActiveUser();
+
+      // Write: admin only
+      allow write: if isAdmin();
+    }
+  }
+}
