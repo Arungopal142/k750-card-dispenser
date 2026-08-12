@@ -8,7 +8,7 @@ import {
   signOut,
   type User as FirebaseUser,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, limit } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
 interface UserProfile {
@@ -47,15 +47,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsub = onAuthStateChanged(auth(), async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
-          const snap = await getDoc(doc(db, "users", firebaseUser.uid));
+          const snap = await getDoc(doc(db(), "users", firebaseUser.uid));
           if (snap.exists()) {
             const data = snap.data() as UserProfile;
             if (data.active === false) {
-              await signOut(auth);
+              await signOut(auth());
               setAuthError("Account is deactivated. Contact admin.");
               setUser(null);
               setProfile(null);
@@ -71,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               role: "user",
               active: true,
             };
-            try { await setDoc(doc(db, "users", firebaseUser.uid), { ...fallback, createdAt: serverTimestamp() }); } catch { /* */ }
+            try { await setDoc(doc(db(), "users", firebaseUser.uid), { ...fallback, createdAt: serverTimestamp() }); } catch { /* */ }
             setProfile(fallback);
           }
         } catch { setProfile(null); }
@@ -86,12 +86,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     setAuthError(null);
     try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      const snap = await getDoc(doc(db, "users", cred.user.uid));
+      const cred = await signInWithEmailAndPassword(auth(), email, password);
+      const snap = await getDoc(doc(db(), "users", cred.user.uid));
       if (snap.exists()) {
         const data = snap.data() as UserProfile;
         if (data.active === false) {
-          await signOut(auth);
+          await signOut(auth());
           throw new Error("Account is deactivated. Contact admin.");
         }
       }
@@ -105,8 +105,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(async (email: string, password: string, displayName: string) => {
     setAuthError(null);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      await setDoc(doc(db, "users", cred.user.uid), {
+      const cred = await createUserWithEmailAndPassword(auth(), email, password);
+      await setDoc(doc(db(), "users", cred.user.uid), {
         uid: cred.user.uid,
         email,
         displayName,
@@ -122,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await signOut(auth);
+    await signOut(auth());
     setProfile(null);
   }, []);
 

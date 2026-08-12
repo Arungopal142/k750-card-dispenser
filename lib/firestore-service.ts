@@ -15,6 +15,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { db } from "./firebase";
+const getDb = () => db();
 
 export function toDate(val: unknown): Date | null {
   if (!val) return null;
@@ -107,7 +108,7 @@ export interface AppSettings {
 // ─── Users ────────────────────────────────────────────────────────────
 
 export async function getAllUsers(): Promise<UserProfile[]> {
-  const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
+  const q = query(collection(getDb(), "users"), orderBy("createdAt", "desc"));
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as UserProfile));
 }
@@ -116,14 +117,14 @@ export async function updateUser(
   id: string,
   data: Partial<UserProfile>
 ): Promise<void> {
-  await updateDoc(doc(db, "users", id), {
+  await updateDoc(doc(getDb(), "users", id), {
     ...data,
     updatedAt: serverTimestamp(),
   });
 }
 
 export async function deleteUser(id: string): Promise<void> {
-  await deleteDoc(doc(db, "users", id));
+  await deleteDoc(doc(getDb(), "users", id));
 }
 
 // ─── Employees ────────────────────────────────────────────────────────
@@ -131,7 +132,7 @@ export async function deleteUser(id: string): Promise<void> {
 export async function addEmployee(
   employee: Omit<Employee, "id" | "createdAt" | "updatedAt">
 ): Promise<string> {
-  const docRef = await addDoc(collection(db, "employees"), {
+  const docRef = await addDoc(collection(getDb(), "employees"), {
     ...employee,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -140,7 +141,7 @@ export async function addEmployee(
 }
 
 export async function getEmployees(): Promise<Employee[]> {
-  const q = query(collection(db, "employees"), orderBy("createdAt", "desc"));
+  const q = query(collection(getDb(), "employees"), orderBy("createdAt", "desc"));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(
     (d) => ({ id: d.id, ...d.data() } as Employee)
@@ -151,14 +152,14 @@ export async function updateEmployee(
   id: string,
   data: Partial<Employee>
 ): Promise<void> {
-  await updateDoc(doc(db, "employees", id), {
+  await updateDoc(doc(getDb(), "employees", id), {
     ...data,
     updatedAt: serverTimestamp(),
   });
 }
 
 export async function deleteEmployee(id: string): Promise<void> {
-  await deleteDoc(doc(db, "employees", id));
+  await deleteDoc(doc(getDb(), "employees", id));
 }
 
 // ─── Card Issues ──────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ export async function deleteEmployee(id: string): Promise<void> {
 export async function logCardIssue(
   issue: Omit<CardIssue, "id" | "issuedAt">
 ): Promise<string> {
-  const docRef = await addDoc(collection(db, "cardIssues"), {
+  const docRef = await addDoc(collection(getDb(), "cardIssues"), {
     ...issue,
     issuedAt: serverTimestamp(),
   });
@@ -177,12 +178,12 @@ export async function updateCardIssue(
   id: string,
   data: Partial<CardIssue>
 ): Promise<void> {
-  await updateDoc(doc(db, "cardIssues", id), data);
+  await updateDoc(doc(getDb(), "cardIssues", id), data);
 }
 
 export async function getAllCardIssues(): Promise<CardIssue[]> {
   const q = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     orderBy("issuedAt", "desc")
   );
   const snapshot = await getDocs(q);
@@ -195,7 +196,7 @@ export async function getMyCardIssues(
   issuedById: string
 ): Promise<CardIssue[]> {
   const q = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     where("issuedById", "==", issuedById),
     orderBy("issuedAt", "desc")
   );
@@ -209,7 +210,7 @@ export function subscribeAllCardIssues(
   callback: (issues: CardIssue[]) => void
 ): () => void {
   const q = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     orderBy("issuedAt", "desc")
   );
   return onSnapshot(q, (snapshot) => {
@@ -225,7 +226,7 @@ export function subscribeMyCardIssues(
   callback: (issues: CardIssue[]) => void
 ): () => void {
   const q = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     where("issuedById", "==", issuedById),
     orderBy("issuedAt", "desc")
   );
@@ -242,7 +243,7 @@ export function subscribeMyCardIssuesByName(
   callback: (issues: CardIssue[]) => void
 ): () => void {
   const q = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     where("issuedBy", "==", issuedBy),
     orderBy("issuedAt", "desc")
   );
@@ -271,26 +272,26 @@ export function subscribeStats(
   todayStart.setHours(0, 0, 0, 0);
   const todayTimestamp = Timestamp.fromDate(todayStart);
 
-  const usersQ = query(collection(db, "users"));
-  const employeesQ = query(collection(db, "employees"));
+  const usersQ = query(collection(getDb(), "users"));
+  const employeesQ = query(collection(getDb(), "employees"));
   const allIssuesQ = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     orderBy("issuedAt", "desc")
   );
   const todayIssuesQ = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     where("issuedAt", ">=", todayTimestamp)
   );
   const failedQ = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     where("status", "==", "Failed")
   );
   const collectedQ = query(
-    collection(db, "cardIssues"),
+    collection(getDb(), "cardIssues"),
     where("status", "==", "Collected")
   );
   const activityQ = query(
-    collection(db, "activityLogs"),
+    collection(getDb(), "activityLogs"),
     orderBy("timestamp", "desc")
   );
 
@@ -374,20 +375,20 @@ export async function getStats(): Promise<{
 
   const [usersSnap, employeesSnap, allIssuesSnap, todaySnap, failedSnap, collectedSnap] =
     await Promise.all([
-      getDocs(collection(db, "users")),
-      getDocs(collection(db, "employees")),
-      getDocs(collection(db, "cardIssues")),
+      getDocs(collection(getDb(), "users")),
+      getDocs(collection(getDb(), "employees")),
+      getDocs(collection(getDb(), "cardIssues")),
       getDocs(
         query(
-          collection(db, "cardIssues"),
+          collection(getDb(), "cardIssues"),
           where("issuedAt", ">=", todayTimestamp)
         )
       ),
       getDocs(
-        query(collection(db, "cardIssues"), where("status", "==", "Failed"))
+        query(collection(getDb(), "cardIssues"), where("status", "==", "Failed"))
       ),
       getDocs(
-        query(collection(db, "cardIssues"), where("status", "==", "Collected"))
+        query(collection(getDb(), "cardIssues"), where("status", "==", "Collected"))
       ),
     ]);
 
@@ -406,7 +407,7 @@ export async function getStats(): Promise<{
 export async function logActivity(
   activity: Omit<ActivityLog, "id" | "timestamp">
 ): Promise<string> {
-  const docRef = await addDoc(collection(db, "activityLogs"), {
+  const docRef = await addDoc(collection(getDb(), "activityLogs"), {
     ...activity,
     timestamp: serverTimestamp(),
   });
@@ -417,7 +418,7 @@ export async function getActivityLogs(
   limit?: number
 ): Promise<ActivityLog[]> {
   let q = query(
-    collection(db, "activityLogs"),
+    collection(getDb(), "activityLogs"),
     orderBy("timestamp", "desc")
   );
   if (limit) {
@@ -435,7 +436,7 @@ export async function getActivityLogs(
 export async function logDevice(
   log: Omit<DeviceLog, "id" | "timestamp">
 ): Promise<string> {
-  const docRef = await addDoc(collection(db, "deviceLogs"), {
+  const docRef = await addDoc(collection(getDb(), "deviceLogs"), {
     ...log,
     timestamp: serverTimestamp(),
   });
@@ -449,13 +450,13 @@ export async function getDeviceLogs(
   let q;
   if (deviceId) {
     q = query(
-      collection(db, "deviceLogs"),
+      collection(getDb(), "deviceLogs"),
       where("deviceId", "==", deviceId),
       orderBy("timestamp", "desc")
     );
   } else {
     q = query(
-      collection(db, "deviceLogs"),
+      collection(getDb(), "deviceLogs"),
       orderBy("timestamp", "desc")
     );
   }
@@ -472,7 +473,7 @@ export async function getDeviceLogs(
 // ─── App Settings ─────────────────────────────────────────────────────
 
 export async function getSettings(): Promise<AppSettings | null> {
-  const docSnap = await getDoc(doc(db, "settings", "app"));
+  const docSnap = await getDoc(doc(getDb(), "settings", "app"));
   if (!docSnap.exists()) return null;
   return { id: docSnap.id, ...docSnap.data() } as AppSettings;
 }
@@ -480,5 +481,5 @@ export async function getSettings(): Promise<AppSettings | null> {
 export async function updateSettings(
   data: Partial<AppSettings>
 ): Promise<void> {
-  await setDoc(doc(db, "settings", "app"), data, { merge: true });
+  await setDoc(doc(getDb(), "settings", "app"), data, { merge: true });
 }
