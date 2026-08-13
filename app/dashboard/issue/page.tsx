@@ -5,127 +5,118 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
 import { useK750 } from "../../../lib/k750-context";
 import type { IssueResult } from "../../../lib/k750-service";
-import { logCardIssue, logActivity, updateCardIssue } from "../../../lib/firestore-service";
+import { logActivity, subscribeIssuedCards, subscribeAllCardIssues, returnCard, logCardIssue, updateCardIssue, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { useToast } from "../../../lib/toast-context";
-import { Loader2, CreditCard, RotateCcw, AlertTriangle, CheckCircle, XCircle, Wifi, WifiOff } from "lucide-react";
+import { Loader2, CreditCard, RotateCcw, AlertTriangle, CheckCircle, XCircle, Wifi, WifiOff, UserPlus, LogOut } from "lucide-react";
 
-function SensorDot({ label, active }: { label: string; active: boolean }) {
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <div
-        className={`h-3 w-3 sm:h-4 sm:w-4 rounded-full border-2 transition-colors ${
-          active
-            ? "bg-green-400 border-green-300 shadow-[0_0_8px_rgba(74,222,128,0.6)]"
-            : "bg-gray-300 border-gray-400"
-        }`}
-      />
-      <span className="text-[9px] sm:text-[10px] font-mono text-gray-500">{label}</span>
-    </div>
-  );
-}
+type TabKey = "issue" | "exit";
 
 export default function IssueCardPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const { service, connState, status: deviceStatus, connect, disconnect } = useK750();
-  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [activeTab, setActiveTab] = useState<TabKey>("issue");
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  // --- Issue Card state ---
   const [result, setResult] = useState<IssueResult | null>(null);
   const [issuing, setIssuing] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [cardIssueId, setCardIssueId] = useState<string | null>(null);
-
   const [empId, setEmpId] = useState("");
   const [empName, setEmpName] = useState("");
   const [empDept, setEmpDept] = useState("");
-  const empIdRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [user, loading, router]);
+  // --- Visitor Exit state ---
+  const [exitResult, setExitResult] = useState<IssueResult | null>(null);
+  const [exitRunning, setExitRunning] = useState(false);
+  const [exitStep, setExitStep] = useState(0);
+  const [exitStepMsg, setExitStepMsg] = useState("");
+  const [issuedCards, setIssuedCards] = useState<CardIssue[]>([]);
+  const [selectedCard, setSelectedCard] = useState<CardIssue | null>(null);
+  const [cardsError, setCardsError] = useState<string | null>(null);
+  const [cardsLoading, setCardsLoading] = useState(true);
 
-  useEffect(() => {
-    if (autoRefreshRef.current) {
-      clearInterval(autoRefreshRef.current);
-      autoRefreshRef.current = null;
-    }
-    if (autoRefresh && connState === "connected" && !issuing) {
-      autoRefreshRef.current = setInterval(() => {
-        service?.queryAP();
-      }, 1000);
-    }
-    return () => {
-      if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
-    };
-  }, [autoRefresh, connState, issuing]);
+  // --- Recycle Bin ---
+  const [recycleCount, setRecycleCount] = useState(0);
+  const RECYCLE_MAX = 13;
 
-  const handleConnect = async () => {
-    try {
-      await connect();
-    } catch {
-      /* */
-    }
-  };
-  const handleDisconnect = async () => {
-    await disconnect();
-  };
-
-  const handleIssue = async () => {
-    if (!empId.trim() || !empName.trim() || !empDept.trim() || !profile) return;
-    if (issuing) return;
-    setIssuing(true);
-    setResult(null);
-    const id = empId.trim();
-    const nm = empName.trim();
-    const dp = empDept.trim();
-    let cardIssueId: string | null = null;
-    try {
-      const issueRes = await logCardIssue({
-        employeeId: id,
-        employeeName: nm,
-        department: dp,
-        issuedBy: profile.displayName || profile.email,
-        issuedById: user?.uid ?? "",
-        status: "Processing",
-        source: "K750",
-      });
-      cardIssueId = issueRes;
-      setCardIssueId(issueRes);
-      const res = await service?.issueCard(id, nm, dp);
-      if (res) {
-        setResult(res);
-        await updateCardIssue(cardIssueId, {
-          status: res.success ? "Issued" : "Failed",
-          ...(res.success ? {} : { errorMessage: res.message }),
-        });
-        await logActivity({
-          userId: user?.uid ?? "",
-          userName: profile?.displayName || "Unknown",
-          action: "Issued Card",
-          details: `${nm} (${id}) - ${res.success ? "Success" : "Failed"}${res.errorCode ? ` [${res.errorCode}]` : ""}`,
-        });
-        toast(
-          res.success ? `Card issued for ${nm}` : res.message,
-          res.success ? "success" : "error"
-        );
-        setEmpId("");
-        setEmpName("");
-        setEmpDept("");
-        setTimeout(() => empIdRef.current?.focus(), 100);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setResult({ success: false, message: `Error: ${msg}` });
-      toast(`Error: ${msg}`, "error");
-      if (cardIssueId) {
-        await updateCardIssue(cardIssueId, { status: "Failed", errorMessage: msg });
-      }
-    }
-    setIssuing(false);
-  };
-
+  // --- Reset ---
   const [resetting, setResetting] = useState(false);
+
+  useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
+
+  // Live list of cards currently out with a visitor. Subscribed for the whole
+  // page (not just the exit tab) so a card issued on the other tab is already
+  // there when the operator switches over. Errors are shown instead of
+  // swallowed — a missing composite index or a rules rejection used to look
+  // exactly like "no issued cards".
+  useEffect(() => {
+    if (!user) return;
+    // cardsLoading starts true; the snapshot/error callbacks clear it.
+    const unsubscribe = subscribeIssuedCards(
+      (cards) => {
+        setIssuedCards(cards);
+        setCardsError(null);
+        setCardsLoading(false);
+        // Keep the selection pointing at live data, and drop it if the card was
+        // returned from another terminal.
+        setSelectedCard((prev) => (prev ? cards.find((c) => c.id === prev.id) ?? null : null));
+      },
+      (err) => {
+        const msg = err.message || String(err);
+        setCardsLoading(false);
+        // Keep the original message: Firestore's missing-index error carries a
+        // console link that creates the index in one click.
+        setCardsError(
+          msg.includes("index")
+            ? `Firestore is missing the index for this query. Run "firebase deploy --only firestore:indexes", or use the link in this error — ${msg}`
+            : msg.includes("permission") || msg.includes("insufficient")
+            ? `Not allowed to read card issues. Deploy the updated firestore.rules and check that your user document has active: true. (${msg})`
+            : `Could not load issued cards: ${msg}`
+        );
+      }
+    );
+    return unsubscribe;
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribe = subscribeAllCardIssues(
+      (all) => {
+        const count = all.filter(c => c.status === "Collected" && c.returnedTo === "recycle").length;
+        setRecycleCount(count);
+      },
+      (err) => console.error("Recycled cards error:", err)
+    );
+    return unsubscribe;
+  }, [user]);
+
+  // Self-scheduling poll: setInterval fired every second regardless of how long
+  // an AP round-trip took, so slow replies queued up behind each other on the
+  // service lock. This waits for each poll to finish and skips while a flow owns
+  // the device.
+  useEffect(() => {
+    if (!(autoRefresh && connState === "connected" && !issuing && !exitRunning)) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      if (!service.isFlowBusy) {
+        try { await service.queryAP(); } catch { /* */ }
+      }
+      if (!cancelled) autoRefreshRef.current = setTimeout(tick, 1000);
+    };
+    autoRefreshRef.current = setTimeout(tick, 1000);
+    return () => {
+      cancelled = true;
+      if (autoRefreshRef.current) clearTimeout(autoRefreshRef.current);
+      autoRefreshRef.current = null;
+    };
+  }, [autoRefresh, connState, issuing, exitRunning, service]);
+
+  const handleConnect = async () => { try { await connect(); } catch { /* */ } };
+  const handleDisconnect = async () => { await disconnect(); };
 
   const handleReset = async () => {
     setResetting(true);
@@ -135,399 +126,363 @@ export default function IssueCardPage() {
     setResetting(false);
     toast(ok ? "Device reset successful" : "Reset failed — no response", ok ? "success" : "error");
   };
-  const handleEject = async () => {
-    await service?.ejectFC0();
-    await service?.queryAP();
+
+  // ===== Issue Card (FC7 → DC) =====
+  const handleIssue = async () => {
+    if (!empId.trim() || !empName.trim() || !empDept.trim() || !profile || issuing) return;
+    if (connState !== "connected") { toast("Connect to K750 device first", "error"); return; }
+    setIssuing(true);
+    setResult(null);
+    const id = empId.trim();
+    const name = empName.trim();
+    const dept = empDept.trim();
+    // The card record is written *before* the device is touched and updated with
+    // the outcome afterwards, so a crash mid-issue leaves a "Processing" row
+    // rather than nothing at all. Without this the Card Return tab (which reads
+    // status == "Issued") stayed empty forever and admin reports missed every
+    // card issued from this page.
+    let cardIssueId: string | null = null;
+    try {
+      cardIssueId = await logCardIssue({
+        employeeId: id,
+        employeeName: name,
+        department: dept,
+        issuedBy: profile.displayName || profile.email,
+        issuedById: user?.uid ?? "",
+        status: "Processing",
+        source: "K750",
+      });
+    } catch { /* device flow must still run even if logging fails */ }
+
+    try {
+      const res = await service?.issueCard(id, name, dept);
+      if (res) {
+        setResult(res);
+        if (cardIssueId) {
+          await updateCardIssue(cardIssueId, {
+            status: res.success ? "Issued" : "Failed",
+            ...(res.success ? {} : { errorMessage: res.message }),
+          }).catch(() => {});
+        }
+        await logActivity({ userId: user?.uid ?? "", userName: profile?.displayName || "Unknown", action: "Card Issued", details: `${name} - ${dept} - ${res.success ? "Success" : "Failed"}` });
+        toast(res.success ? `Card issued!` : res.message, res.success ? "success" : "error");
+        if (res.success) {
+          setTimeout(() => { setEmpId(""); setEmpName(""); setEmpDept(""); setResult(null); }, 3000);
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setResult({ success: false, message: `Error: ${msg}` });
+      toast(`Error: ${msg}`, "error");
+      if (cardIssueId) await updateCardIssue(cardIssueId, { status: "Failed", errorMessage: msg }).catch(() => {});
+    }
+    setIssuing(false);
   };
 
-  if (loading || !profile)
-    return (
-      <div className="p-4 md:p-6 text-gray-500">Loading...</div>
-    );
+  // ===== Visitor Exit: FD0 → visitor inserts card → FC7 → DB/CP → Firestore =====
+  const handleVisitorExit = async () => {
+    if (exitRunning || connState !== "connected" || !selectedCard || !profile) return;
+    const card = selectedCard;
+    setExitRunning(true);
+    setExitResult(null);
+    setExitStep(0);
+    try {
+      const res = await service?.visitorCheckout((step, msg) => { setExitStep(step); setExitStepMsg(msg); });
+      if (res) {
+        if (res.success && card.id) {
+          // The card is physically back in the machine. If this write fails the
+          // database and the hardware disagree, so say so loudly rather than
+          // reporting a clean success.
+          try {
+            await returnCard(card.id, profile.displayName || profile.email, "recycle");
+            await logActivity({
+              userId: user?.uid ?? "",
+              userName: profile?.displayName || "Unknown",
+              action: "Card Returned",
+              details: `${card.employeeName}${card.companyName ? ` - ${card.companyName}` : ""} → recycle box`,
+            });
+          } catch (dbErr) {
+            const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+            const warning = `Card was returned to the machine, but the record could not be updated: ${msg}`;
+            setExitResult({ success: false, message: warning });
+            toast(warning, "error");
+            setExitRunning(false);
+            setExitStep(0);
+            setExitStepMsg("");
+            return;
+          }
+        }
+        setExitResult(res);
+        toast(res.success ? res.message : res.message, res.success ? "success" : "error");
+        // On success the live subscription drops the row and clears the selection.
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setExitResult({ success: false, message: `Error: ${msg}` });
+      toast(`Error: ${msg}`, "error");
+    }
+    setExitRunning(false);
+    setExitStep(0);
+    setExitStepMsg("");
+  };
+
+  if (loading || !profile) return <div className="p-4 md:p-6 text-gray-500">Loading...</div>;
 
   const s = deviceStatus;
-  const b1 = s?.raw.byte1 ?? 0;
-  const b2 = s?.raw.byte2 ?? 0;
-  const b3 = s?.raw.byte3 ?? 0;
   const b4 = s?.raw.byte4 ?? 0;
   const hasCardInChannel = !!(b4 & 0x07);
-  const blocking = b4 & 0x07
-    ? "Card in channel - eject first"
-    : s && s.raw.byte3 & 0x04
-    ? "Card overlap"
-    : s && s.raw.byte3 & 0x02
-    ? "Card jam"
-    : s && s.raw.byte2 & 0x02
-    ? "Issue error"
-    : null;
+  const blocking = b4 & 0x07 ? "Card in channel — eject first" : null;
+
+  const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
+    { key: "issue", label: "Issue Card", icon: <CreditCard className="w-4 h-4" /> },
+    { key: "exit", label: "Card Return", icon: <LogOut className="w-4 h-4" /> },
+  ];
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Page Header */}
       <div className="flex items-center gap-4">
-        <img src="/images/card-issue-icon.svg" alt="Issue Card" className="w-12 h-12" />
+        <img src="/images/card-issue-icon.svg" alt="Card" className="w-12 h-12" />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Issue Card</h1>
-          <p className="text-sm text-gray-500">
-            Dispense a new card to an employee
-          </p>
+          <h1 className="text-[26px] font-bold text-gray-900">Card Management</h1>
+          <p className="text-[14px] text-gray-500">Issue or return cards</p>
         </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Tabs */}
+      <div className="flex gap-1 rounded-xl bg-gray-100 p-1">
+        {tabs.map((t) => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-[14px] font-medium transition-all flex-1 justify-center ${activeTab === t.key ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}>
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Connection Bar */}
+      <div className="flex flex-wrap items-center gap-4 rounded-xl bg-white border border-gray-200 shadow-sm p-4">
+        <div className="flex items-center gap-3">
+          <span className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 ${connState === "connected" ? "bg-green-500 animate-pulse-glow" : connState === "connecting" ? "bg-yellow-500 animate-pulse" : "bg-gray-400"}`} />
+          <span className="text-sm font-medium text-gray-900 capitalize">
+            {connState === "connected" ? "Connected" : connState === "disconnected" ? "Disconnected" : connState === "connecting" ? "Connecting..." : "Error"}
+          </span>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          {connState === "disconnected" || connState === "error" ? (
+            <button onClick={handleConnect} className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors flex items-center gap-1.5">
+              <Wifi className="w-3.5 h-3.5" /> Connect
+            </button>
+          ) : (
+            <button onClick={handleDisconnect} className="rounded-lg bg-gray-200 border border-gray-300 px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-300 transition-colors flex items-center gap-1.5">
+              <WifiOff className="w-3.5 h-3.5" /> Disconnect
+            </button>
+          )}
+          <button onClick={handleReset} disabled={connState !== "connected" || resetting}
+            className="rounded-lg bg-gray-200 border border-gray-300 px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-300 transition-colors flex items-center gap-1.5 disabled:opacity-40">
+            {resetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+            {resetting ? "RS..." : "RS"}
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ===== LEFT PANEL (col-span-2) ===== */}
+        {/* ===== LEFT PANEL ===== */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Connection Status Bar */}
-          <div className="flex flex-wrap items-center gap-4 rounded-xl bg-white border border-gray-200 shadow-sm p-4">
-            <div className="flex items-center gap-3">
-              <span
-                className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 ${
-                  connState === "connected"
-                    ? "bg-green-500 animate-pulse-glow"
-                    : connState === "connecting"
-                    ? "bg-yellow-500 animate-pulse"
-                    : "bg-gray-400"
-                }`}
-              />
-              <span className="text-sm font-medium text-gray-900 capitalize">
-                {connState === "connected"
-                  ? "Connected"
-                  : connState === "disconnected"
-                  ? "Disconnected"
-                  : connState === "connecting"
-                  ? "Connecting..."
-                  : "Error"}
-              </span>
-            </div>
-            <div className="ml-auto">
-              {connState === "disconnected" || connState === "error" ? (
-                <button
-                  onClick={handleConnect}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors btn-primary flex items-center gap-1.5"
-                >
-                  <Wifi className="w-3.5 h-3.5" /> Connect
-                </button>
-              ) : (
-                <button
-                  onClick={handleDisconnect}
-                  className="rounded-lg bg-gray-200 border border-gray-300 px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-300 transition-colors flex items-center gap-1.5"
-                >
-                  <WifiOff className="w-3.5 h-3.5" /> Disconnect
-                </button>
-              )}
-            </div>
-          </div>
 
-          {/* Employee Details Card */}
-          <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-5 space-y-4">
-            <h2
-              className="text-[11px] font-semibold text-[#64748b] uppercase tracking-wider"
-              style={{ fontSize: "11px" }}
-            >
-              Employee Details
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-gray-500 uppercase">
-                  Employee ID
-                </label>
-                <input
-                  ref={empIdRef}
-                  value={empId}
-                  onChange={(e) => setEmpId(e.target.value)}
-                  className="w-full rounded-[6px] border border-[#cbd5e1] bg-white px-4 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
-                  style={{ height: "40px" }}
-                  placeholder="Enter employee ID"
-                />
+          {/* ===== ISSUE CARD TAB ===== */}
+          {activeTab === "issue" && (
+            <>
+              <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-5 space-y-4">
+                <h2 className="text-[12px] font-semibold text-[#64748b] uppercase tracking-wider" style={{ fontSize: "12px" }}>Card Details</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[12px] font-medium text-gray-500 uppercase">Employee ID *</label>
+                    <input value={empId} onChange={(e) => setEmpId(e.target.value.slice(0, 50))}
+                      className="w-full rounded-[6px] border border-[#cbd5e1] bg-white px-4 text-[14px] text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors" style={{ height: "42px" }} placeholder="Employee ID" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[12px] font-medium text-gray-500 uppercase">Name *</label>
+                    <input value={empName} onChange={(e) => setEmpName(e.target.value.slice(0, 50))}
+                      className="w-full rounded-[6px] border border-[#cbd5e1] bg-white px-4 text-[14px] text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors" style={{ height: "42px" }} placeholder="Full name" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[12px] font-medium text-gray-500 uppercase">Department *</label>
+                    <input value={empDept} onChange={(e) => setEmpDept(e.target.value.slice(0, 50))}
+                      className="w-full rounded-[6px] border border-[#cbd5e1] bg-white px-4 text-[14px] text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors" style={{ height: "42px" }} placeholder="Department" />
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-gray-500 uppercase">
-                  Name
-                </label>
-                <input
-                  value={empName}
-                  onChange={(e) => setEmpName(e.target.value)}
-                  className="w-full rounded-[6px] border border-[#cbd5e1] bg-white px-4 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
-                  style={{ height: "40px" }}
-                  placeholder="Enter employee name"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-gray-500 uppercase">
-                  Department
-                </label>
-                <input
-                  value={empDept}
-                  onChange={(e) => setEmpDept(e.target.value)}
-                  className="w-full rounded-[6px] border border-[#cbd5e1] bg-white px-4 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
-                  style={{ height: "40px" }}
-                  placeholder="Enter department"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Result Banner */}
-          {result && (
-            <div
-              className={`rounded-xl p-4 text-sm font-medium flex items-center gap-3 animate-fade-in ${
-                result.success
-                  ? "bg-green-50 border border-green-200 text-green-700"
-                  : "bg-red-50 border border-red-200 text-red-700"
-              }`}
-            >
-              {result.success ? (
-                <CheckCircle className="w-5 h-5 flex-shrink-0" />
-              ) : (
-                <XCircle className="w-5 h-5 flex-shrink-0" />
+              {result && (
+                <div className={`rounded-xl p-4 text-sm font-medium flex items-center gap-3 animate-fade-in ${result.success ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
+                  {result.success ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : <XCircle className="w-5 h-5 flex-shrink-0" />}
+                  {result.message}
+                </div>
               )}
-              {result.message}
-            </div>
+              <button onClick={handleIssue}
+                disabled={connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim()}
+                className="w-full rounded-xl px-6 py-3 text-[14px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2" style={{ height: "48px", backgroundColor: "#16a34a" }}>
+                {issuing ? <><Loader2 className="animate-spin h-4 w-4" /> Issuing...</> : <><CreditCard className="w-5 h-5" /> Issue Card</>}
+              </button>
+            </>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex gap-3">
-            <button
-              onClick={handleIssue}
-              disabled={
-                connState !== "connected" ||
-                issuing ||
-                !!blocking ||
-                hasCardInChannel ||
-                !empId.trim() ||
-                !empName.trim() ||
-                !empDept.trim()
-              }
-              className="flex-1 rounded-xl px-6 text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all btn-primary flex items-center justify-center gap-2"
-              style={{
-                height: "48px",
-                backgroundColor: "#16a34a",
-              }}
-            >
-              {issuing ? (
-                <>
-                  <Loader2 className="animate-spin h-4 w-4" /> Issuing...
-                </>
-              ) : (
-                <>
-                  <CreditCard className="w-5 h-5" /> Issue Card
-                </>
-              )}
-            </button>
-            <button
-              onClick={handleReset}
-              disabled={connState !== "connected" || resetting}
-              className="rounded-xl px-5 text-xs font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-40 transition-colors flex items-center gap-1.5"
-              style={{
-                height: "48px",
-                border: "none",
-                background: "transparent",
-              }}
-            >
-              {resetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-              {resetting ? "RS..." : "RS"}
-            </button>
-          </div>
+          {/* ===== VISITOR EXIT TAB ===== */}
+          {activeTab === "exit" && (
+            <>
+              <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-[12px] font-semibold text-[#64748b] uppercase tracking-wider" style={{ fontSize: "12px" }}>Select Card to Return</h2>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setRecycleCount(0)}
+                      className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-all ${recycleCount >= RECYCLE_MAX ? "bg-red-500 text-white hover:bg-red-600 animate-pulse" : recycleCount >= RECYCLE_MAX - 3 ? "bg-amber-500 text-white hover:bg-amber-600" : "bg-green-500 text-white hover:bg-green-600"}`}>
+                      <RotateCcw className="w-3.5 h-3.5" /> Recycle {recycleCount}/{RECYCLE_MAX}
+                    </button>
+                    <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-400">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                      Live · {issuedCards.length} issued
+                    </span>
+                  </div>
+                </div>
 
-          {/* Blocking Warning */}
+                <p className="text-sm text-gray-500">
+                  Select the card below, then have the visitor insert it into the front bezel.
+                  The card is collected into the <span className="font-medium text-gray-700">recycle box</span>.
+                </p>
+
+                {cardsError ? (
+                  <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{cardsError}</span>
+                  </div>
+                ) : cardsLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-400">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Loading issued cards...
+                  </div>
+                ) : issuedCards.length === 0 ? (
+                  <div className="text-center py-8 text-sm text-gray-400">
+                    No issued cards to return
+                    <span className="block text-xs text-gray-300 mt-1">Cards appear here as soon as they are issued</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {issuedCards.map((card) => (
+                      <button key={card.id} onClick={() => setSelectedCard(card)} disabled={exitRunning}
+                        className={`w-full text-left rounded-lg border p-3 transition-all disabled:opacity-60 ${selectedCard?.id === card.id ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500/20" : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{card.employeeName}</p>
+                            <p className="text-xs text-gray-500 truncate">
+                              {card.companyName || card.department}
+                              {card.hostName ? ` • Host: ${card.hostName}` : ""}
+                            </p>
+                            <p className="text-[11px] text-gray-400 mt-0.5">Issued by {card.issuedBy}</p>
+                          </div>
+                          <span className="text-[11px] text-gray-400 whitespace-nowrap">{formatDateTime(card.issuedAt)}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {exitRunning && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-gray-600">
+                      <span className="font-mono font-bold text-blue-600">{exitStep}/4</span>
+                      <span>{exitStepMsg}</span>
+                    </div>
+                    <div className="flex gap-1.5">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors ${i <= exitStep ? "bg-blue-500" : "bg-gray-200"}`} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {exitResult && (
+                <div className={`rounded-xl p-4 text-sm font-medium flex items-center gap-3 animate-fade-in ${exitResult.success ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
+                  {exitResult.success ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : <XCircle className="w-5 h-5 flex-shrink-0" />}
+                  {exitResult.message}
+                </div>
+              )}
+              <button onClick={handleVisitorExit}
+                disabled={connState !== "connected" || exitRunning || hasCardInChannel || !selectedCard}
+                className="w-full rounded-xl px-6 py-3 text-[14px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2" style={{ height: "48px", backgroundColor: "#2563eb" }}>
+                {exitRunning ? <><Loader2 className="animate-spin h-4 w-4" /> Processing...</> : <><LogOut className="w-5 h-5" /> Check Out{selectedCard ? ` — ${selectedCard.employeeName}` : ""}</>}
+              </button>
+              {!selectedCard && !cardsError && issuedCards.length > 0 && (
+                <p className="text-xs text-gray-400 text-center">Select a card above to enable check out</p>
+              )}
+            </>
+          )}
+
           {blocking && (
             <div className="text-xs text-red-600 flex items-center gap-1.5">
-              <AlertTriangle className="w-4 h-4" />
-              {blocking}
+              <AlertTriangle className="w-4 h-4" /> {blocking}
             </div>
           )}
         </div>
 
-        {/* ===== RIGHT PANEL (col-span-1) ===== */}
+        {/* ===== RIGHT PANEL — Device Status ===== */}
         <div className="space-y-4">
           <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-5 space-y-5">
-            {/* Device Header */}
             <div className="flex items-center justify-between">
-              <h2
-                className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider"
-                style={{ fontSize: "11px" }}
-              >
-                K750 Device
-              </h2>
+              <h2 className="text-[12px] font-semibold text-gray-900 uppercase tracking-wider" style={{ fontSize: "12px" }}>K750 Device</h2>
               <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-gray-300 bg-white text-green-600 focus:ring-green-500"
-                />
-                Auto
+                <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-gray-300 bg-white text-green-600 focus:ring-green-500" /> Auto
               </label>
             </div>
-
-            {/* Connection Status */}
             <div className="flex items-center gap-2 text-xs text-gray-600">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  connState === "connected"
-                    ? "bg-green-500"
-                    : connState === "connecting"
-                    ? "bg-yellow-500 animate-pulse"
-                    : "bg-gray-400"
-                }`}
-              />
+              <span className={`inline-block h-2 w-2 rounded-full ${connState === "connected" ? "bg-green-500" : connState === "connecting" ? "bg-yellow-500 animate-pulse" : "bg-gray-400"}`} />
               <span className="capitalize">{connState}</span>
             </div>
-
-            {!s && (
-              <p className="text-sm text-gray-400">
-                Connect device to see status.
-              </p>
-            )}
-
+            {!s && <p className="text-sm text-gray-400">Connect device to see status.</p>}
             {s && (
               <div className="space-y-4">
-                {/* Status Bytes */}
                 <div className="space-y-2">
-                  {/* Channel (b4) */}
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-                      Channel (b4)
-                    </span>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        b4 & 0x08
-                          ? "bg-red-50 text-red-700 border border-red-200"
-                          : b4 & 0x04
-                          ? "bg-blue-50 text-blue-700 border border-blue-200"
-                          : "bg-green-50 text-green-700 border border-green-200"
-                      }`}
-                    >
-                      {b4 & 0x08
-                        ? "Box EMPTY"
-                        : b4 & 0x04
-                        ? "Reader"
-                        : "Clear"}
+                    <span className="text-[11px] text-gray-500 uppercase tracking-wider">Channel (b4)</span>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${b4 & 0x08 ? "bg-red-50 text-red-700 border border-red-200" : b4 & 0x04 ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-green-50 text-green-700 border border-green-200"}`}>
+                      {b4 & 0x08 ? "Box EMPTY" : b4 & 0x04 ? "Reader" : "Clear"}
                     </span>
                   </div>
-
-                  {/* Machine (b1) */}
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-                      Machine (b1)
-                    </span>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        b1 === 0
-                          ? "bg-green-50 text-green-700 border border-green-200"
-                          : "bg-yellow-50 text-yellow-700 border border-yellow-200"
-                      }`}
-                    >
-                      {b1 === 0 ? "Idle" : "Busy"}
+                    <span className="text-[11px] text-gray-500 uppercase tracking-wider">Machine (b1)</span>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${s.raw.byte1 === 0 ? "bg-green-50 text-green-700 border border-green-200" : "bg-yellow-50 text-yellow-700 border border-yellow-200"}`}>
+                      {s.raw.byte1 === 0 ? "Idle" : "Busy"}
                     </span>
                   </div>
-
-                  {/* Action (b2) */}
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-                      Action (b2)
-                    </span>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        b2 === 0
-                          ? "bg-green-50 text-green-700 border border-green-200"
-                          : "bg-yellow-50 text-yellow-700 border border-yellow-200"
-                      }`}
-                    >
-                      {b2 === 0 ? "Ready" : "Busy"}
-                    </span>
-                  </div>
-
-                  {/* Card Box (b3) */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-                      Card Box (b3)
-                    </span>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        b3 === 0
-                          ? "bg-green-50 text-green-700 border border-green-200"
-                          : "bg-red-50 text-red-700 border border-red-200"
-                      }`}
-                    >
-                      {b3 === 0
-                        ? "OK"
-                        : b3 & 0x04
-                        ? "Overlap"
-                        : b3 & 0x02
-                        ? "Jam"
-                        : "Error"}
+                    <span className="text-[11px] text-gray-500 uppercase tracking-wider">Card Box (b3)</span>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${s.raw.byte3 === 0 ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+                      {s.raw.byte3 === 0 ? "OK" : s.raw.byte3 & 0x04 ? "Overlap" : s.raw.byte3 & 0x02 ? "Jam" : "Error"}
                     </span>
                   </div>
                 </div>
-
-                {/* Sensor Visualization */}
                 <div className="border-t border-gray-200 pt-4">
-                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-3">
-                    Sensors
-                  </h4>
+                  <h4 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-3">Sensors</h4>
                   <div className="bg-gray-100 rounded-lg py-4 px-4">
                     <div className="flex items-center justify-center gap-0">
-                      <span className="text-[9px] font-mono text-gray-500 mr-2">
-                        Stack
-                      </span>
+                      <span className="text-[9px] font-mono text-gray-500 mr-2">Stack</span>
                       <div className="h-px w-3 bg-gray-300" />
                       <div className="h-0 w-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[5px] border-l-gray-300" />
-                      <div className="flex flex-col items-center mx-1">
-                        <div
-                          className={`h-3 w-3 rounded-full border-2 transition-all ${
-                            !!(b4 & 0x01)
-                              ? "bg-green-400 border-green-300 shadow-[0_0_8px_rgba(74,222,128,0.6)]"
-                              : "bg-gray-300 border-gray-400"
-                          }`}
-                        />
-                        <span className="text-[8px] font-mono text-gray-500 mt-1">
-                          S1
-                        </span>
-                      </div>
+                      {[{ label: "S1", bit: 0x01 }, { label: "S2", bit: 0x02 }, { label: "S3", bit: 0x04 }].map((sensor, idx) => (
+                        <div key={sensor.label} className="flex items-center">
+                          <div className="flex flex-col items-center mx-1">
+                            <div className={`h-3 w-3 rounded-full border-2 transition-all ${!!(b4 & sensor.bit) ? "bg-green-400 border-green-300 shadow-[0_0_8px_rgba(74,222,128,0.6)]" : "bg-gray-300 border-gray-400"}`} />
+                            <span className="text-[8px] font-mono text-gray-500 mt-1">{sensor.label}</span>
+                          </div>
+                          {idx < 2 && <><div className="h-px w-3 bg-gray-300" /><div className="h-0 w-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[5px] border-l-gray-300" /></>}
+                        </div>
+                      ))}
                       <div className="h-px w-3 bg-gray-300" />
                       <div className="h-0 w-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[5px] border-l-gray-300" />
-                      <div className="flex flex-col items-center mx-1">
-                        <div
-                          className={`h-3 w-3 rounded-full border-2 transition-all ${
-                            !!(b4 & 0x02)
-                              ? "bg-green-400 border-green-300 shadow-[0_0_8px_rgba(74,222,128,0.6)]"
-                              : "bg-gray-300 border-gray-400"
-                          }`}
-                        />
-                        <span className="text-[8px] font-mono text-gray-500 mt-1">
-                          S2
-                        </span>
-                      </div>
-                      <div className="h-px w-3 bg-gray-300" />
-                      <div className="h-0 w-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[5px] border-l-gray-300" />
-                      <div className="flex flex-col items-center mx-1">
-                        <div
-                          className={`h-3 w-3 rounded-full border-2 transition-all ${
-                            !!(b4 & 0x04)
-                              ? "bg-green-400 border-green-300 shadow-[0_0_8px_rgba(74,222,128,0.6)]"
-                              : "bg-gray-300 border-gray-400"
-                          }`}
-                        />
-                        <span className="text-[8px] font-mono text-gray-500 mt-1">
-                          S3
-                        </span>
-                      </div>
-                      <div className="h-px w-3 bg-gray-300" />
-                      <div className="h-0 w-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[5px] border-l-gray-300" />
-                      <span className="text-[9px] font-mono text-gray-500 ml-2">
-                        Bay
-                      </span>
+                      <span className="text-[9px] font-mono text-gray-500 ml-2">Bay</span>
                     </div>
                   </div>
                 </div>
-
-                {/* Raw Hex Data */}
                 <div className="border-t border-gray-200 pt-4">
-                  <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
-                    Raw Data (HEX)
-                  </div>
+                  <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Raw Data (HEX)</div>
                   <div className="bg-gray-50 rounded-lg px-3 py-2 font-mono text-xs text-gray-700 break-all">
                     {s.raw.byte1.toString(16).padStart(2, "0").toUpperCase()}{" "}
                     {s.raw.byte2.toString(16).padStart(2, "0").toUpperCase()}{" "}

@@ -1,0 +1,71 @@
+﻿Step 1: Open the serial port
+Step 2: Search for the address
+Step 3: Query the device channel status (AP), whether there is a card, and deal with the card.
+Step 4: Start the card issuance process, open a multi-threaded query (AP), and feedback the card
+box and channel status in real time, whether the card issuance conditions are met (the channel has
+no card, and the card box has a card)
+Step 5: The current state is the card issuing state, and the card issuing command (FC7) starts to be
+executed.
+Step 6: After the card issuing command is executed, make a timeout query immediately to see if
+the card is successfully sent to the card reader position, code reference
+While (timeout)
+{
+Sleep(300);
+Query whether the card has reached the card reading position (AP)
+If(card position = card reader position)
+break;
+}
+//We recommend 12 seconds for the timeout
+Step 7: If it is found in the sixth step that the card is in the channel, start to read and write the card.
+After completion, execute the command to eject the card, and check whether the card is removed
+in real time, and then it can be recycled over time. If the card is not issued to the card reading
+position normally, please skip to the third step (and record a log, indicating that the card issued to
+the card reading position failed).
+Step 8: If the card reading and writing is completed, execute the card ejecting command, and open
+a query thread to monitor whether the card is removed. If it is removed, jump to the third step.
+So far, the whole process has been completed.
+
+When returning the query (AP) results, please refer to the returned data analysis:
+The first status byte: indicates the machine status
+The second status byte: Indicates the machine action status
+The third status byte: Indicates the status of the machine card box
+The fourth status byte: indicates the machine channel status
+
+The binary of the lower four bits of each of the above four bytes refers to the following table data:
+Binary State
+1000 0000 0000 0000 Recycle box is full
+0100 0000 0000 0000 Command cannot be executed
+0010 0000 0000 0000 Failed to prepare card
+0001 0000 0000 0000 Preparing card (k720)
+
+Card box pre-filled (k750)) see
+the following instructions 1
+
+0000 1000 0000 0000 Issuing card
+0000 0100 0000 0000 receiving card
+0000 0010 0000 0000 Card issuance error
+
+
+
+0000 0001 0000 0000 Card collection error
+0000 0000 1000 0000 Card box full (only for k750)
+0000 0000 0100 0000 Overlapping Cards
+0000 0000 0010 0000 Jam card
+0000 0000 0001 0000 Card pre-empty
+0000 0000 0000 1000 Empty card
+0000 0000 0000 0100 Stuck in sensor 3 position
+0000 0000 0000 0010 Stuck in sensor 2 position
+0000 0000 0000 0001 Stuck in sensor 1 position
+
+For example: Now channel sensors 1/2/3 have cards, then the return data of the fourth byte is:
+0x37 (corresponding lower four bits: 0111)
+If there are cards in channel sensor 1/2/3 at this time, and the card box is empty, then the return
+data of the fourth byte is: 0x3F (corresponding lower four bits: 1111), each bit can be
+superimposed on each other
+
+If you have any questions about this, please refer to the reference code in the same directory,
+which contains detailed data analysis.
+
+For all the above interface commands, we recommend calling the time interval Slee(300) between
+the interface and the interface; if the interface returns a negative number for many times, it means
+that the communication is abnormal. At this time, you can try the first and second steps.

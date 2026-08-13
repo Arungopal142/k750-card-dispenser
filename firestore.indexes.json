@@ -1,11 +1,35 @@
 {
   "indexes": [
     {
-      "collectionGroup": "card_issues",
+      "collectionGroup": "cardIssues",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "issuedBy", "order": "ASCENDING" },
         { "fieldPath": "issuedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cardIssues",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "issuedById", "order": "ASCENDING" },
+        { "fieldPath": "issuedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cardIssues",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "issuedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "deviceLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deviceId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
       ]
     }
   ],

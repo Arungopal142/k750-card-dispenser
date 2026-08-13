@@ -9,7 +9,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen" style={{ background: "#f8fafc" }}>
       <Sidebar />
       <main
-        className={`transition-all duration-300 p-6 ${
+        className={`transition-all duration-300 p-4 md:p-6 lg:p-8 ${
           collapsed ? "md:ml-[60px]" : "md:ml-[220px]"
         }`}
       >

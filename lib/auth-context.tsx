@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInAnonymously,
   createUserWithEmailAndPassword,
   signOut,
   type User as FirebaseUser,
@@ -27,6 +28,7 @@ interface AuthContextType {
   authError: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName: string) => Promise<void>;
+  loginAnonymously: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -37,6 +39,7 @@ const AuthContext = createContext<AuthContextType>({
   authError: null,
   login: async () => {},
   register: async () => {},
+  loginAnonymously: async () => {},
   logout: async () => {},
 });
 
@@ -59,9 +62,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setAuthError("Account is deactivated. Contact admin.");
               setUser(null);
               setProfile(null);
+              setLoading(false);
             } else {
               setProfile({ uid: firebaseUser.uid, email: firebaseUser.email ?? "", displayName: firebaseUser.displayName ?? firebaseUser.email?.split("@")[0] ?? "", role: data.role ?? "user", active: data.active ?? true });
               setAuthError(null);
+              setLoading(false);
             }
           } else {
             const fallback: UserProfile = {
@@ -73,12 +78,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             };
             try { await setDoc(doc(db(), "users", firebaseUser.uid), { ...fallback, createdAt: serverTimestamp() }); } catch { /* */ }
             setProfile(fallback);
+            setLoading(false);
           }
-        } catch { setProfile(null); }
+        } catch { setProfile(null); setLoading(false); }
       } else {
         setProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
     return unsub;
   }, []);
@@ -102,18 +108,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const register = useCallback(async (email: string, password: string, displayName: string) => {
+  const register = useCallback(async (email: string, password: string, _displayName: string) => {
     setAuthError(null);
     try {
-      const cred = await createUserWithEmailAndPassword(auth(), email, password);
-      await setDoc(doc(db(), "users", cred.user.uid), {
+      await createUserWithEmailAndPassword(auth(), email, password);
+      // Profile is created automatically by onAuthStateChanged fallback
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAuthError(msg);
+      throw err;
+    }
+  }, []);
+
+  const loginAnonymously = useCallback(async () => {
+    setAuthError(null);
+    try {
+      const cred = await signInAnonymously(auth());
+      const fallback: UserProfile = {
         uid: cred.user.uid,
-        email,
-        displayName,
+        email: "",
+        displayName: "Kiosk User",
         role: "user",
         active: true,
-        createdAt: serverTimestamp(),
-      });
+      };
+      try {
+        await setDoc(doc(db(), "users", cred.user.uid), {
+          ...fallback,
+          createdAt: serverTimestamp(),
+        });
+      } catch { /* */ }
+      setProfile(fallback);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setAuthError(msg);
@@ -124,10 +148,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await signOut(auth());
     setProfile(null);
+    setAuthError(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, authError, login, register, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, authError, login, register, loginAnonymously, logout }}>
       {children}
     </AuthContext.Provider>
   );

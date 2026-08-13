@@ -1,0 +1,548 @@
+﻿USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+ 
+
+ 
+
+USERS MANUAL 
+ 
+
+ 
+
+TTCE-K750 
+
+ 
+ 
+ 
+ 
+
+Shenzhen Tianteng Industry Co.,Ltd 
+Tel：0755-27324297  27324634  29987067   
+
+Fax：0755-27324300   
+
+E-mail：ttce@szttce.com 
+
+Website：http://www.szttce.com/ 
+st
+
+Addr.: Blgd. A8, Xiashiwei 1  industrial zone, Fuyong, Baoan District, Shenzhen, China 
+
+Postal Code: 518103 
+
+   
+Page 1 of 9 
+
+
+
+USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+ 
+
+ Components Instructions： 
+
+ 
+ 
+
+ 
+
+    
+
+ Card stacker 
+ 
+
+ 
+Card stacker statue 
+
+ 
+Sensor board  
+
+ RF antenna board 
+
+ 
+
+ 
+
+ 
+
+ 
+Dispenser 
+
+ 
+gate 
+
+ 
+Main board 
+
+ 
+
+ 
+
+ Bottom board Transmission 
+
+ bearing 
+Dispensing Motor 
+
+ 
+
+ 
+
+ 
+Card stacker 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ Dispensing parts 
+
+ 
+
+ 
+
+ RF antenna board 
+
+ 
+Dispensing bearing 
+
+ 
+
+ Dispenser gate 
+
+ Channel sensor 
+
+ board 
+
+ 
+Recycle box 
+
+ 
+
+   
+Page 2 of 9 
+
+
+
+USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+  
+
+ Brief Introduction: 
+ 
+
+This product adopts industrial design, good resistance to abrasion and corrosion, fit for high or low temperature 
+
+and dusty environments. It has multiple card stay position, and channel is plastic material. Reserves card reading module 
+
+install position. Simulation manpower friction card issuing makes most deformed card recognized. Active stacker 
+
+installation space can let you manage cards more effective. Six shifts card space adjustment is our patented technology 
+
+used for issuing cards with different thickness, and CNC precision ensures absolute unanimity of card space. Support 
+
+ 
+Mifare 1 standard card read, write, issue. 
+
+ 
+
+ Functions: 
+ 
+
+ Usage：Support Mifare 1 ISO15693，ISO1443A  standard card read, write, and issuing. 
+
+ Preventing dispensing double card simultaneously: Up gear and down gear swirl in different direction, and 
+
+friction dispensing card can avoid dispensing double card at the same time, even suitable to some distorted cards. 
+
+ Stable card dispensing rate：Special friction dispensing structure and wear-resisting plastic wheel ensure card 
+
+dispensing successful any time. 
+
+ Non-metal channel：Non-metal dispensing channel ensure card reading performance of contactless card not be 
+
+affected. 
+
+ Collect card: Collect card to card issuing box from front gate of dispenser 
+
+ Removable recycle box：removable recycle box，can stored 18 cards max. (0.76mm thickness) 
+
+ Card empty and pre-empty detect function and sound alarm 
+
+ Card stand position: Many card stand positions to satisfy customer requirements. 
+ Communication interface: RS232 serial interface, suitable for multiple machines. 
+
+ Multiple machines communication: 1 RS232 serial interface communicates to control 16 equipments can help 
+save money. 
+
+ Card available: Can issue all cards in the stacker in normal condition. Most distorted cards can be issued by 
+
+using card holder 
+ 
+
+ ※ SPECIAL FUNCTION DESCRIBTION.
+
+Collect card: Collect card to card issuing box from front gate of dispenser 
+
+Advantage: Not required big volume for card stacker, and cards can be circulated.  
+
+ 
+
+Insert card from the front bezel Automatically indrawed the card 
+to card stacker
+
+   
+Page 3 of 9 
+
+
+
+USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+ 
+
+ Technical Parameter and Specifications： 
+
+ 
+ 
+
+ Applications: 
+1. Hotel room card solution 
+
+2. Parking lot management system 
+
+3. Automatic vending system 
+
+4. Subway or public transportation card issue 
+
+5. Park ticket vending system 
+
+6. Card initialization issue 
+
+          
+
+ 
+
+ 
+
+   
+Page 4 of 9 
+
+
+
+USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+ 
+
+ Interface instructions and statement： 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+        J6 
+        J5 
+ 
+                J4 
+                J3 
+ 
+ 
+
+J3, J4= Communication interface;     J5, J6= Power connect interface 
+
+ 
+
+1, RS232 serial port connecting instruction for K750. 
+
+A. Find the accessory of DB9 data cable and connect the DB9 connector to the PC。 
+
+B. Connect the other side of the accessory data cable to the communication interface on the back PCB board of K750 
+
+with 3PIN connector（Red wire is TXD, Blue wire is RXD, Black wire is GND） 
+
+ 
+ 3 PIN connector 
+            
+                   
+  
+                
+
+DB9 connector 
+  
+
+DB9 Connector to the PC                         TTCE 3PIN connector to K750 
+
+ 
+
+     TTCE Serial communication cable                K750 Right back of the PCB board 
+
+2, TTCE Power cable 
+
+ 
+
+ 
+
+  
+
+Power cable 
+
+plug 
+
+      
+
+   
+Page 5 of 9 
+
+
+
+USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+ 
+
+ Dimensions for Installation 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 50PCS 0.76mm card stacker
+
+   
+Page 6 of 9 
+
+
+
+USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+ 
+
+ Dimensions for Installation 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 200PCS 0.76mm card stacker
+ 
+
+   
+Page 7 of 9 
+
+
+
+USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+ 
+
+ Maintenance and caution 
+
+1. Daily maintenance 
+
+After card dispenser uses long period or dispenses a certain quantities of card, some part will 
+have great abrasion through long time operation. Then it is necessary to maintain card dispenser. 
+The procedure is as below: 
+
+1）Check if parts of card dispenser are loose or abnormal. If so, please fasten or repair immediately. 
+
+2）Check if the belts are loose. If so, please adjust the position of wheel. 
+
+3）Use cleaning card or soft cloth dipped with alcohol to clean up wheels at the bottom of card 
+
+cabinet. 
+
+4）Pick out cards with greasy surface and distorted cards.  Use soft cloth dipped with alcohol to 
+
+clean cards with greasy surface. If distorted cards cannot be repaired, you need to change cards.  
+
+2. Caution for safe use 
+
+1）When opening host machine or cabinet to repair, power connected with card dispenser must be 
+
+shut off to avoid damage machine. 
+
+2）Be careful of the difference of power positive and negative in the first power-on. 
+
+3）Notice the jumping line explanation in the first use. Wrong jumping line may cause machine 
+
+unable to work or uncertain status. 
+
+4）Forbid hot-plugging connecting socket in the port. Hot-plugging is easy to damage control 
+
+circuit. 
+
+5）Keep card dispenser clean, no oil. Greasy binder may damage the performance of card dispenser 
+
+greatly. 
+
+6）There is a red hand-operated soft reset button at the rear down position of card dispenser body 
+
+side. Field operator can adjust by hand when there is error or abnormal condition in the field 
+operation. In normal condition please do not use it. 
+
+7）Resetting button can be used to sort cards in stacker  and reclaim cards hand-operated. 
+
+8）Resetting button has overtime protection. Hold and press the button motor will stop operating 
+
+automatically to protect motor. 
+
+   
+Page 8 of 9 
+
+
+
+USERS MANUAL 
+Model No.  TTCE-K750 
+
+Version 3.0 Date 2017-10-17 
+ 
+
+ 
+
+ 
+
+ Warranty 
+
+1）Our products have one year free warranty. Warranty period starts from the date that users 
+
+receive products. 
+
+2）Repairing method is that users send products to our factory. 
+
+3）After the warranty period, our company will still provide after sale service. In case it is involved 
+
+with replace parts, our company will charge a certain material cost. But for the below condition 
+
+even in the warranty our company will charge a certain repairing fee in repairing. 
+
+a) Damage or trouble caused by human error after purchase; 
+
+b) Damage or trouble caused by operation of unprofessional technician; 
+
+c) Damage or trouble caused by unstable outer power or voltage;  
+
+d) Trouble and damage caused by force majeure such as earthquake etc.  
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+Shenzhen Tianteng Industry Co.,Ltd 
+
+ 
+
+                                                                         2017-10-17 
+
+   
+Page 9 of 9

@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "../lib/auth-context";
+import { useK750 } from "../lib/k750-context";
 import { useSidebar } from "../lib/sidebar-context";
 import { useState } from "react";
 import {
   LayoutDashboard,
   CreditCard,
   ClipboardList,
-  Users,
   UserCog,
   MonitorDot,
   Activity,
@@ -20,14 +20,12 @@ import {
   X,
   ChevronsLeft,
   ChevronsRight,
-  HardDrive,
 } from "lucide-react";
 
 type NavItem = {
   href: string;
   label: string;
   icon: React.ElementType;
-  adminOnly?: boolean;
 };
 
 type NavSection = {
@@ -41,18 +39,16 @@ const adminSections: NavSection[] = [
     items: [{ href: "/admin", label: "Dashboard", icon: LayoutDashboard }],
   },
   {
-    label: "CARD OPERATIONS",
+    label: "CARD OPS",
     items: [
-      { href: "/admin/cards", label: "Issue Card", icon: CreditCard },
-      { href: "/admin/cards/collect", label: "Collect Card", icon: ClipboardList },
-      { href: "/admin/cards/inventory", label: "Card Inventory", icon: HardDrive, adminOnly: true },
+      { href: "/dashboard/issue", label: "Issue Card", icon: CreditCard },
+      { href: "/admin/cards", label: "Card Records", icon: ClipboardList },
     ],
   },
   {
     label: "MANAGEMENT",
     items: [
-      { href: "/admin/employees", label: "Employees", icon: Users },
-      { href: "/admin/users", label: "Users", icon: UserCog, adminOnly: true },
+      { href: "/admin/users", label: "Users", icon: UserCog },
     ],
   },
   {
@@ -78,10 +74,10 @@ const userSections: NavSection[] = [
     items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
   },
   {
-    label: "CARD OPERATIONS",
+    label: "CARD OPS",
     items: [
       { href: "/dashboard/issue", label: "Issue Card", icon: CreditCard },
-      { href: "/dashboard/my-cards", label: "Collect Card", icon: ClipboardList },
+      { href: "/dashboard/my-cards", label: "My Cards", icon: ClipboardList },
     ],
   },
 ];
@@ -89,59 +85,6 @@ const userSections: NavSection[] = [
 function isActive(pathname: string, href: string) {
   if (href === "/admin" || href === "/dashboard") return pathname === href;
   return pathname.startsWith(href);
-}
-
-function Brand({ collapsed }: { collapsed: boolean }) {
-  return (
-    <div
-      className="flex items-center justify-between"
-      style={{ height: 56, paddingLeft: collapsed ? 0 : 16, paddingRight: collapsed ? 0 : 12 }}
-    >
-      <div className={`flex items-center gap-3 ${collapsed ? "justify-center w-full" : ""}`}>
-        <div
-          className="flex-shrink-0 flex items-center justify-center"
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            background: "#2563eb",
-          }}
-        >
-          <CreditCard className="w-3.5 h-3.5 text-white" />
-        </div>
-        {!collapsed && (
-          <div className="overflow-hidden">
-            <h1 className="text-[13px] font-bold whitespace-nowrap" style={{ color: "#1e293b" }}>
-              K750 CARD
-            </h1>
-            <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>
-              Management
-            </p>
-          </div>
-        )}
-      </div>
-      <div className={collapsed ? "hidden" : ""}>
-        <button
-          onClick={() => {}}
-          className="p-1 rounded-md transition-colors"
-          style={{ color: "#94a3b8" }}
-          title="Collapse sidebar"
-        >
-          <ChevronsLeft className="w-4 h-4" />
-        </button>
-      </div>
-      {collapsed && (
-        <button
-          onClick={() => {}}
-          className="p-1 rounded-md transition-colors"
-          style={{ color: "#94a3b8" }}
-          title="Expand sidebar"
-        >
-          <ChevronsRight className="w-4 h-4" />
-        </button>
-      )}
-    </div>
-  );
 }
 
 function NavItem({
@@ -163,10 +106,10 @@ function NavItem({
       title={collapsed ? item.label : undefined}
       className="flex items-center gap-3 rounded-md transition-all"
       style={{
-        height: 36,
+        height: 40,
         paddingLeft: collapsed ? 0 : 12,
         paddingRight: collapsed ? 0 : 12,
-        fontSize: 13,
+        fontSize: 14,
         fontWeight: 500,
         justifyContent: collapsed ? "center" : "flex-start",
         background: active ? "#eff6ff" : "transparent",
@@ -184,7 +127,7 @@ function NavItem({
         }
       }}
     >
-      <Icon className="flex-shrink-0" style={{ width: 16, height: 16 }} strokeWidth={1.5} />
+      <Icon className="flex-shrink-0" style={{ width: 18, height: 18 }} strokeWidth={1.5} />
       {!collapsed && <span className="truncate">{item.label}</span>}
     </Link>
   );
@@ -192,12 +135,14 @@ function NavItem({
 
 export default function Sidebar() {
   const { profile, logout } = useAuth();
+  const { connState } = useK750();
   const pathname = usePathname();
   const router = useRouter();
   const { collapsed, toggle } = useSidebar();
   const [open, setOpen] = useState(false);
   const isAdmin = profile?.role === "admin";
   const sections = isAdmin ? adminSections : userSections;
+  const isOnline = connState === "connected";
 
   const handleLogout = async () => {
     await logout();
@@ -244,11 +189,11 @@ export default function Sidebar() {
             </div>
             {!collapsed && (
               <div className="overflow-hidden">
-                <h1 className="text-[13px] font-bold whitespace-nowrap" style={{ color: "#1e293b" }}>
-                  K750 CARD
+                <h1 className="text-[14px] font-bold whitespace-nowrap" style={{ color: "#1e293b" }}>
+                  VMS CARD DISPENSER
                 </h1>
-                <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>
-                  Management
+                <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  Management System
                 </p>
               </div>
             )}
@@ -282,7 +227,7 @@ export default function Sidebar() {
           <div key={section.label} className="mb-2">
             {!collapsed && (
               <p
-                className="text-[10px] font-semibold uppercase px-4 py-2"
+                className="text-[11px] font-semibold uppercase px-4 py-2"
                 style={{ color: "#64748b", letterSpacing: "0.08em" }}
               >
                 {section.label}
@@ -321,17 +266,17 @@ export default function Sidebar() {
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: "#22c55e",
-              boxShadow: "0 0 6px rgba(34,197,94,0.4)",
+              background: isOnline ? "#22c55e" : "#94a3b8",
+              boxShadow: isOnline ? "0 0 6px rgba(34,197,94,0.4)" : "none",
             }}
           />
           {!collapsed && (
             <>
-              <span className="text-xs font-medium" style={{ color: "#475569" }}>
+              <span className="text-[13px] font-medium" style={{ color: "#475569" }}>
                 K750-001
               </span>
-              <span className="text-[10px] font-semibold uppercase ml-auto" style={{ color: "#22c55e" }}>
-                ONLINE
+              <span className="text-[11px] font-semibold uppercase ml-auto" style={{ color: isOnline ? "#22c55e" : "#94a3b8" }}>
+                {isOnline ? "ONLINE" : "OFFLINE"}
               </span>
             </>
           )}
@@ -347,7 +292,7 @@ export default function Sidebar() {
               borderRadius: "50%",
               background: "#eff6ff",
               color: "#2563eb",
-              fontSize: 12,
+              fontSize: 13,
               fontWeight: 600,
             }}
           >
@@ -355,10 +300,10 @@ export default function Sidebar() {
           </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium truncate" style={{ color: "#1e293b" }}>
+              <div className="text-[13px] font-medium truncate" style={{ color: "#1e293b" }}>
                 {profile?.displayName}
               </div>
-              <div className="text-[10px] truncate capitalize" style={{ color: "#94a3b8" }}>
+              <div className="text-[11px] truncate capitalize" style={{ color: "#94a3b8" }}>
                 {profile?.role}
               </div>
             </div>
@@ -368,7 +313,7 @@ export default function Sidebar() {
         {/* Logout */}
         <button
           onClick={handleLogout}
-          className={`w-full flex items-center gap-3 rounded-md text-[13px] font-medium transition-colors ${
+          className={`w-full flex items-center gap-3 rounded-md text-[14px] font-medium transition-colors ${
             collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2"
           }`}
           style={{ color: "#ef4444" }}
@@ -408,7 +353,7 @@ export default function Sidebar() {
           >
             <CreditCard className="w-3 h-3 text-white" />
           </div>
-          <h1 className="text-sm font-bold" style={{ color: "#1e293b" }}>K750</h1>
+          <h1 className="text-sm font-bold" style={{ color: "#1e293b" }}>VMS CARD DISPENSER</h1>
         </div>
       </div>
 
@@ -440,9 +385,9 @@ export default function Sidebar() {
               <CreditCard className="w-3.5 h-3.5 text-white" />
             </div>
             <div>
-              <h1 className="text-[13px] font-bold" style={{ color: "#1e293b" }}>K750 CARD</h1>
-              <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>
-                Management
+              <h1 className="text-[14px] font-bold" style={{ color: "#1e293b" }}>VMS CARD DISPENSER</h1>
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>
+                Management System
               </p>
             </div>
           </div>
@@ -458,7 +403,7 @@ export default function Sidebar() {
         <nav className="flex-1 p-3 space-y-3 overflow-y-auto">
           {sections.map((section) => (
             <div key={section.label}>
-              <p className="text-[10px] font-semibold uppercase tracking-wider px-3 py-2" style={{ color: "#64748b", letterSpacing: "0.08em" }}>
+              <p className="text-[11px] font-semibold uppercase tracking-wider px-3 py-2" style={{ color: "#64748b", letterSpacing: "0.08em" }}>
                 {section.label}
               </p>
               <div className="space-y-0.5">
@@ -487,12 +432,12 @@ export default function Sidebar() {
                 width: 8,
                 height: 8,
                 borderRadius: "50%",
-                background: "#22c55e",
-                boxShadow: "0 0 6px rgba(34,197,94,0.4)",
+                background: isOnline ? "#22c55e" : "#94a3b8",
+                boxShadow: isOnline ? "0 0 6px rgba(34,197,94,0.4)" : "none",
               }}
             />
-            <span className="text-xs font-medium" style={{ color: "#475569" }}>K750-001</span>
-            <span className="text-[10px] font-semibold uppercase ml-auto" style={{ color: "#22c55e" }}>ONLINE</span>
+            <span className="text-[13px] font-medium" style={{ color: "#475569" }}>K750-001</span>
+            <span className="text-[11px] font-semibold uppercase ml-auto" style={{ color: isOnline ? "#22c55e" : "#94a3b8" }}>{isOnline ? "ONLINE" : "OFFLINE"}</span>
           </div>
 
           <div className="flex items-center gap-3 px-2">
@@ -504,17 +449,17 @@ export default function Sidebar() {
                 borderRadius: "50%",
                 background: "#eff6ff",
                 color: "#2563eb",
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: 600,
               }}
             >
               {initials}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium truncate" style={{ color: "#1e293b" }}>
+              <div className="text-[13px] font-medium truncate" style={{ color: "#1e293b" }}>
                 {profile?.displayName}
               </div>
-              <div className="text-[10px] truncate capitalize" style={{ color: "#94a3b8" }}>
+              <div className="text-[11px] truncate capitalize" style={{ color: "#94a3b8" }}>
                 {profile?.role}
               </div>
             </div>
@@ -522,7 +467,7 @@ export default function Sidebar() {
 
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium transition-colors"
+            className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-[14px] font-medium transition-colors"
             style={{ color: "#ef4444" }}
           >
             <LogOut className="w-4 h-4" strokeWidth={1.5} />

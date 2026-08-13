@@ -89,6 +89,12 @@ export default function ReportsPage() {
   }, [filtered, reportType]);
 
   const exportCSV = () => {
+    const escapeCSV = (val: string) => {
+      if (val.includes(",") || val.includes('"') || val.includes("\n") || val.includes("\r")) {
+        return `"${val.replace(/"/g, '""')}"`;
+      }
+      return val;
+    };
     const headers = [
       "Employee ID",
       "Name",
@@ -109,7 +115,7 @@ export default function ReportsPage() {
       c.checkedOutBy || "",
       c.status,
     ]);
-    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const csv = [headers, ...rows].map((r) => r.map(escapeCSV).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -129,9 +135,9 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
+          <h1 className="text-[26px] font-bold text-gray-900">Reports</h1>
           <p className="text-sm text-gray-500 mt-1">Card issuance analytics</p>
         </div>
         <button
@@ -175,22 +181,22 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-4 text-center">
-          <div className="text-2xl font-bold text-gray-900">{summary.total}</div>
-          <div className="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">Total</div>
+          <div className="text-[28px] font-bold text-gray-900">{summary.total}</div>
+          <div className="text-[11px] text-gray-500 mt-1 uppercase tracking-wider">Total</div>
         </div>
         <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-center">
-          <div className="text-2xl font-bold text-green-700">{summary.issued}</div>
-          <div className="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">Active (Issued)</div>
+          <div className="text-[28px] font-bold text-green-700">{summary.issued}</div>
+          <div className="text-[11px] text-gray-500 mt-1 uppercase tracking-wider">Active (Issued)</div>
         </div>
         <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4 text-center">
-          <div className="text-2xl font-bold text-cyan-700">{summary.collected}</div>
-          <div className="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">Collected</div>
+          <div className="text-[28px] font-bold text-cyan-700">{summary.collected}</div>
+          <div className="text-[11px] text-gray-500 mt-1 uppercase tracking-wider">Collected</div>
         </div>
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
-          <div className="text-2xl font-bold text-red-700">{summary.failed}</div>
-          <div className="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">Failed</div>
+          <div className="text-[28px] font-bold text-red-700">{summary.failed}</div>
+          <div className="text-[11px] text-gray-500 mt-1 uppercase tracking-wider">Failed</div>
         </div>
       </div>
 
@@ -203,26 +209,26 @@ export default function ReportsPage() {
                 {group} <span className="text-gray-500 font-normal">({items.length} cards)</span>
               </h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-xs">
+                <table className="w-full text-[14px]">
                   <thead>
                     <tr className="border-b border-gray-200 bg-gray-50 text-gray-500">
-                      <th className="text-left py-2.5 px-3">Employee</th>
-                      <th className="text-left py-2.5 px-3">Date</th>
-                      <th className="text-left py-2.5 px-3">Status</th>
+                      <th className="text-left py-3 px-4">Employee</th>
+                      <th className="text-left py-3 px-4">Date</th>
+                      <th className="text-left py-3 px-4">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((c) => (
                       <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-2.5 px-3 text-gray-900 font-medium">
+                        <td className="py-3 px-4 text-gray-900 font-medium">
                           {c.employeeName} <span className="text-gray-500">({c.employeeId})</span>
                         </td>
-                        <td className="py-2.5 px-3 text-gray-500">
+                        <td className="py-3 px-4 text-gray-500">
                           {formatDateTime(c.issuedAt)}
                         </td>
-                        <td className="py-2.5 px-3">
+                        <td className="py-3 px-4">
                           <span
-                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-medium ${
+                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
                               c.status === "Collected"
                                 ? "bg-blue-50 text-blue-700"
                                 : c.status === "Processing"
@@ -244,30 +250,30 @@ export default function ReportsPage() {
           ))
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-[14px]">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50 text-gray-500">
-                  <th className="text-left py-2.5 px-3">Employee ID</th>
-                  <th className="text-left py-2.5 px-3">Name</th>
-                  <th className="text-left py-2.5 px-3 hidden sm:table-cell">Department</th>
-                  <th className="text-left py-2.5 px-3 hidden md:table-cell">Issued By</th>
-                  <th className="text-left py-2.5 px-3">Date</th>
-                  <th className="text-left py-2.5 px-3">Status</th>
+                  <th className="text-left py-3 px-4">Employee ID</th>
+                  <th className="text-left py-3 px-4">Name</th>
+                  <th className="text-left py-3 px-4 hidden sm:table-cell">Department</th>
+                  <th className="text-left py-3 px-4 hidden md:table-cell">Issued By</th>
+                  <th className="text-left py-3 px-4">Date</th>
+                  <th className="text-left py-3 px-4">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((c) => (
                   <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-2.5 px-3 font-mono text-gray-900">{c.employeeId}</td>
-                    <td className="py-2.5 px-3 text-gray-900 font-medium">{c.employeeName}</td>
-                    <td className="py-2.5 px-3 text-gray-500 hidden sm:table-cell">{c.department}</td>
-                    <td className="py-2.5 px-3 text-gray-500 hidden md:table-cell">{c.issuedBy}</td>
-                    <td className="py-2.5 px-3 text-gray-500">
+                    <td className="py-3 px-4 font-mono text-gray-900">{c.employeeId}</td>
+                    <td className="py-3 px-4 text-gray-900 font-medium">{c.employeeName}</td>
+                    <td className="py-3 px-4 text-gray-500 hidden sm:table-cell">{c.department}</td>
+                    <td className="py-3 px-4 text-gray-500 hidden md:table-cell">{c.issuedBy}</td>
+                    <td className="py-3 px-4 text-gray-500">
                       {getDate(c)?.toLocaleString() || "N/A"}
                     </td>
-                    <td className="py-2.5 px-3">
+                    <td className="py-3 px-4">
                       <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-medium ${
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
                           c.status === "Collected"
                             ? "bg-blue-50 text-blue-700"
                             : c.status === "Processing"

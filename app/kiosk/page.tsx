@@ -1,15 +1,34 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useK750 } from "../../lib/k750-context";
 import type { IssueResult } from "../../lib/k750-service";
-import { logCardIssue, logActivity, updateCardIssue } from "../../lib/firestore-service";
+import { logCardIssue, updateCardIssue } from "../../lib/firestore-service";
 import { useToast } from "../../lib/toast-context";
+import { useAuth } from "../../lib/auth-context";
 import { Loader2, CreditCard, CheckCircle, XCircle, Wifi, WifiOff, RotateCcw, AlertTriangle } from "lucide-react";
 
 export default function KioskPage() {
   const { toast } = useToast();
   const { service, connState, status: deviceStatus, connect } = useK750();
+  const { user, loginAnonymously, loading: authLoading, authError } = useAuth();
+  const [authRetrying, setAuthRetrying] = useState(false);
+  const triedAnonymous = useRef(false);
+
+  useEffect(() => {
+    if (!authLoading && !user && !authError && !triedAnonymous.current) {
+      triedAnonymous.current = true;
+      loginAnonymously().catch(() => {});
+    }
+  }, [authLoading, user, loginAnonymously, authError]);
+
+  const handleRetryAuth = async () => {
+    setAuthRetrying(true);
+    try {
+      await loginAnonymously();
+    } catch { /* */ }
+    setAuthRetrying(false);
+  };
 
   const [result, setResult] = useState<IssueResult | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -26,7 +45,7 @@ export default function KioskPage() {
 
   const handleIssue = async () => {
     if (!empId.trim() || !empName.trim() || !empDept.trim()) return;
-    if (issuing || connState !== "connected") return;
+    if (issuing || connState !== "connected" || !user) return;
     setIssuing(true);
     setResult(null);
     setIssued(false);
@@ -37,7 +56,7 @@ export default function KioskPage() {
     try {
       const issueRes = await logCardIssue({
         employeeId: id, employeeName: nm, department: dp,
-        issuedBy: "Self-Service", issuedById: "kiosk", status: "Processing",
+        issuedBy: "Self-Service", issuedById: user.uid, status: "Processing",
         source: "K750",
       });
       cardIssueId = issueRes;
@@ -66,11 +85,6 @@ export default function KioskPage() {
     setIssuing(false);
   };
 
-  const handleReset = async () => {
-    await service?.resetDevice();
-    await service?.queryAP();
-  };
-
   const s = deviceStatus;
   const b4 = s?.raw.byte4 ?? 0;
   const hasCardInChannel = !!(b4 & 0x07);
@@ -88,7 +102,7 @@ export default function KioskPage() {
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-sm">
             <CreditCard className="w-5 h-5 text-white" />
           </div>
-          <span className="text-sm font-bold tracking-wide text-gray-900" style={{ letterSpacing: "0.08em" }}>K750 CARD SERVICES</span>
+          <span className="text-[15px] font-bold tracking-wide text-gray-900" style={{ letterSpacing: "0.08em" }}>K750 CARD SERVICES</span>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -117,12 +131,45 @@ export default function KioskPage() {
       <div className="flex-1 flex items-center justify-center" style={{ overflow: "auto" }}>
         <div style={{ maxWidth: 600, width: "100%", padding: "24px 24px" }}>
 
+          {/* ========== AUTH LOADING STATE ========== */}
+          {authLoading && (
+            <div className="flex flex-col items-center text-center space-y-4">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+              <p style={{ fontSize: 14, color: "#64748b" }}>Initializing kiosk...</p>
+            </div>
+          )}
+
+          {/* ========== AUTH ERROR STATE ========== */}
+          {!authLoading && authError && !user && (
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center">
+                <AlertTriangle className="w-8 h-8 text-red-500" />
+              </div>
+              <h2 style={{ fontSize: 18, fontWeight: 700 }} className="text-gray-900">Authentication Failed</h2>
+              <p style={{ fontSize: 13, color: "#64748b" }}>{authError}</p>
+              <button
+                onClick={handleRetryAuth}
+                disabled={authRetrying}
+                style={{
+                  height: 48, width: "100%", borderRadius: 8,
+                  backgroundColor: "#2563eb", color: "#fff",
+                  fontWeight: 600, fontSize: 14,
+                  opacity: authRetrying ? 0.6 : 1,
+                }}
+                className="flex items-center justify-center gap-2"
+              >
+                {authRetrying ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {authRetrying ? "Retrying..." : "Retry"}
+              </button>
+            </div>
+          )}
+
           {/* ========== IDLE STATE ========== */}
-          {!issued && !issuing && !(result && !issued) && (
+          {!authLoading && user && !issued && !issuing && !(result && !issued) && (
             <div className="flex flex-col items-center text-center space-y-6">
               <div>
-                <h2 style={{ fontSize: 20, fontWeight: 700 }} className="text-gray-900">ENTER YOUR DETAILS</h2>
-                <p style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Fill in the form to receive your ID card</p>
+                <h2 style={{ fontSize: 22, fontWeight: 700 }} className="text-gray-900">ENTER YOUR DETAILS</h2>
+                <p style={{ fontSize: 14, color: "#64748b", marginTop: 4 }}>Fill in the form to receive your ID card</p>
               </div>
 
               <div className="w-full space-y-4">
@@ -132,34 +179,34 @@ export default function KioskPage() {
                   onChange={(e) => setEmpId(e.target.value)}
                   autoFocus
                   placeholder="Employee ID"
-                  style={{ height: 56, fontSize: 16, borderRadius: 8, border: "1px solid #cbd5e1" }}
+                  style={{ height: 56, fontSize: 17, borderRadius: 8, border: "1px solid #cbd5e1" }}
                   className="w-full bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all px-4"
                 />
                 <input
                   value={empName}
                   onChange={(e) => setEmpName(e.target.value)}
                   placeholder="Full Name"
-                  style={{ height: 56, fontSize: 16, borderRadius: 8, border: "1px solid #cbd5e1" }}
+                  style={{ height: 56, fontSize: 17, borderRadius: 8, border: "1px solid #cbd5e1" }}
                   className="w-full bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all px-4"
                 />
                 <input
                   value={empDept}
                   onChange={(e) => setEmpDept(e.target.value)}
                   placeholder="Department"
-                  style={{ height: 56, fontSize: 16, borderRadius: 8, border: "1px solid #cbd5e1" }}
+                  style={{ height: 56, fontSize: 17, borderRadius: 8, border: "1px solid #cbd5e1" }}
                   className="w-full bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all px-4"
                 />
               </div>
 
               <button
                 onClick={handleIssue}
-                disabled={connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim()}
+                disabled={connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim() || !user || authLoading}
                 style={{
                   height: 56, width: "100%", borderRadius: 8,
                   backgroundColor: "#16a34a", color: "#fff",
-                  fontWeight: 700, fontSize: 16,
-                  opacity: (connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim()) ? 0.4 : 1,
-                  cursor: (connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim()) ? "not-allowed" : "pointer",
+                  fontWeight: 700, fontSize: 17,
+                  opacity: (connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim() || !user || authLoading) ? 0.4 : 1,
+                  cursor: (connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim() || !user || authLoading) ? "not-allowed" : "pointer",
                 }}
                 className="flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
               >
@@ -177,7 +224,7 @@ export default function KioskPage() {
           {/* ========== PROCESSING STATE ========== */}
           {issuing && (
             <div className="flex flex-col items-center text-center space-y-6">
-              <h2 style={{ fontSize: 20, fontWeight: 700 }} className="text-gray-900">PREPARING CARD...</h2>
+              <h2 style={{ fontSize: 22, fontWeight: 700 }} className="text-gray-900">PREPARING CARD...</h2>
 
               <div className="w-32 h-32 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center">
                 <CreditCard className="w-16 h-16 text-blue-400" />
@@ -207,8 +254,8 @@ export default function KioskPage() {
               <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center" style={{ animation: "fadeInScale 0.5s ease-out" }}>
                 <CheckCircle className="w-12 h-12 text-green-500" />
               </div>
-              <h2 style={{ fontSize: 20, fontWeight: 700, color: "#16a34a" }}>CARD ISSUED SUCCESSFULLY</h2>
-              <p style={{ fontSize: 13, color: "#64748b" }}>Please collect your card from the dispenser</p>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: "#16a34a" }}>CARD ISSUED SUCCESSFULLY</h2>
+              <p style={{ fontSize: 14, color: "#64748b" }}>Please collect your card from the dispenser</p>
               <button
                 onClick={() => { setIssued(false); setResult(null); empIdRef.current?.focus(); }}
                 style={{ height: 56, width: "100%", borderRadius: 8, backgroundColor: "#f1f5f9", border: "1px solid #e2e8f0", fontWeight: 600, fontSize: 15, color: "#334155" }}

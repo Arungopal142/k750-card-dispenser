@@ -3,21 +3,22 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../lib/auth-context";
-import { Shield, Mail, Lock, AlertCircle, Loader2, ArrowRight } from "lucide-react";
+import { Shield, Mail, Lock, AlertCircle, Loader2, ArrowRight, Eye, EyeOff } from "lucide-react";
 
 export default function AdminLoginPage() {
   const { login, user, profile, authError } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Derived during render instead of pushed into state from an effect.
+  const accessDenied = !!(user && profile && profile.role !== "admin");
+
   useEffect(() => {
-    if (user && profile) {
-      if (profile.role === "admin") router.replace("/admin");
-      else setError("Access denied. Admin role required.");
-    }
+    if (user && profile && profile.role === "admin") router.replace("/admin");
   }, [user, profile, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -65,7 +66,6 @@ export default function AdminLoginPage() {
             ))}
           </div>
           <div className="flex gap-6 items-center">
-            <span style={{ fontSize: "12px", fontWeight: 600, color: "#0f172a" }}>341 CARDS</span>
             <span className="flex items-center gap-1.5" style={{ fontSize: "12px", color: "#16a34a" }}>
               <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#16a34a", display: "inline-block" }} /> ONLINE
             </span>
@@ -84,36 +84,48 @@ export default function AdminLoginPage() {
               <Shield className="w-5 h-5" style={{ color: "#dc2626" }} />
             </div>
             <div>
-              <h1 style={{ fontSize: "18px", fontWeight: 700, color: "#0f172a" }}>K750 CARD DISPENSER</h1>
-              <p style={{ fontSize: "12px", fontWeight: 500, color: "#dc2626" }}>Admin Portal</p>
+              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>VMS CARD DISPENSER</h1>
+              <p style={{ fontSize: "13px", fontWeight: 500, color: "#dc2626" }}>Admin Portal</p>
             </div>
-            <p style={{ fontSize: "13px", color: "#64748b" }}>Welcome back. Sign in to continue.</p>
+            <p style={{ fontSize: "14px", color: "#64748b" }}>Welcome back. Sign in to continue.</p>
           </div>
 
-          {(authError || error) && (
+          {(authError || error || accessDenied) && (
             <div className="flex items-center gap-2" style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "10px 12px" }}>
               <AlertCircle className="flex-shrink-0" style={{ width: "14px", height: "14px", color: "#dc2626" }} />
-              <span style={{ fontSize: "12px", color: "#dc2626" }}>{authError || error}</span>
+              <span style={{ fontSize: "12px", color: "#dc2626" }}>
+                {authError || error || "Access denied. Admin role required."}
+              </span>
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5" style={{ fontSize: "11px", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>
+              <label className="flex items-center gap-1.5" style={{ fontSize: "12px", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>
                 <Mail style={{ width: "13px", height: "13px" }} /> Email
               </label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="admin@email.com"
-                className="w-full" style={{ backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", height: "44px", padding: "0 14px", color: "#0f172a", fontSize: "14px", outline: "none" }} />
+                className="w-full" style={{ backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", height: "44px", padding: "0 14px", color: "#0f172a", fontSize: "15px", outline: "none" }} />
             </div>
             <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5" style={{ fontSize: "11px", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>
+              <label className="flex items-center gap-1.5" style={{ fontSize: "12px", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>
                 <Lock style={{ width: "13px", height: "13px" }} /> Password
               </label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} placeholder="Min 6 characters"
-                className="w-full" style={{ backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", height: "44px", padding: "0 14px", color: "#0f172a", fontSize: "14px", outline: "none" }} />
+              <div className="relative">
+                <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} placeholder="Min 6 characters"
+                  className="w-full" style={{ backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", height: "44px", padding: "0 40px 0 14px", color: "#0f172a", fontSize: "15px", outline: "none" }} />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                  style={{ color: "#94a3b8", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                >
+                  {showPassword ? <EyeOff style={{ width: "18px", height: "18px" }} /> : <Eye style={{ width: "18px", height: "18px" }} />}
+                </button>
+              </div>
             </div>
             <button type="submit" disabled={submitting} className="w-full flex items-center justify-center gap-2"
-              style={{ backgroundColor: submitting ? "#94a3b8" : "#dc2626", color: "#ffffff", fontWeight: 600, fontSize: "14px", height: "44px", borderRadius: "6px", border: "none", cursor: submitting ? "not-allowed" : "pointer" }}>
+              style={{ backgroundColor: submitting ? "#94a3b8" : "#dc2626", color: "#ffffff", fontWeight: 600, fontSize: "15px", height: "44px", borderRadius: "6px", border: "none", cursor: submitting ? "not-allowed" : "pointer" }}>
               {submitting ? (<><Loader2 className="animate-spin" style={{ width: "16px", height: "16px" }} /> Please wait...</>) : (<>Admin Sign In <ArrowRight style={{ width: "16px", height: "16px" }} /></>)}
             </button>
           </form>

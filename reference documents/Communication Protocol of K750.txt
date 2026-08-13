@@ -1,0 +1,1045 @@
+﻿K720/K730/k750 Communication Protocol
+I. Communication Data Format
+Communication asynchronous communication, half duplex
+Method
+Initial bit 1bit
+Data bit 8bits
+Check bit None
+Stop bit 1bit
+Preset baud rate 9600bps
+
+II. Data packet format
+Command-sending packet format
+STX ADDR SELEN CM PM SE_DATAB ETX BCC
+
+SELEN length range
+
+BCC calculation range
+Package length at max：300pcs byte
+
+Correct returning packet format
+STX ADDR RELEN ‘P’ CM PM RE_DATAB ETX BCC
+
+RELEN length range
+
+Error returning packet format
+STX ADDR RELEN ‘N’ CM PM ERR_CD ETX BCC
+
+RELEN length range
+
+Note：
+[1]CM，Command code
+[2]PM，Command Parameter
+[3]SE_DATAB，Sending data bag
+[4]RE_DATAB，Returning data bag。
+[5]ERR_CD，Error code
+[6]BCC，Xor check sum.Calculating method：Xor operation every data from stx (Include STX) to
+ETX (Include ETX)
+[7]‘P’，=0x50。Means that Command operation succeed
+[8]‘N’，=0x4E。Means that command operation fail
+[9]SELEN，Length of the sending data packet. Two bytes. Consists of sending bag length high bit
+[SELEN_H] and sending bag length low bit [SELEN_L]. SELEN length = [SELEN_H] × 256 ﹢
+[SELEN_L]
+
+[10]RELEN，Length of the returning data packet. Two bytes. Consists of returning bag length high bit
+[RELEN_H] and returning bag length low bit [RELEN_L]. RELEN length = [RELEN_H] × 256
+﹢ [RELEN_L]
+
+[11]STX，Block begin symbol. Preset：0X02
+
+第 1页，共 19页
+
+
+
+[12]ETX，Block end symbol。Preset：0x03
+[13]ADDR ， Multiple machine communication address, length is two byte. High bit at
+front(ADDH)，low bit at back（ADDL）
+Note: when Card reader/writer receives command bag from host machine, if character interval
+time of command bag is over 15MS, it will take it as overtime and void.
+
+ADDR set by DIP switch，address as belows：
+
+DIP Switch Hex ADDH ADDL
+4 3 2 1
+ON ON ON ON 00 30 30
+ON ON ON OFF 01 30 31
+ON ON OFF ON 02 30 32
+ON ON OFF OFF 03 30 33
+ON OFF ON ON 04 30 34
+ON OFF ON OFF 05 30 35
+ON OFF OFF ON 06 30 36
+ON OFF OFF OFF 07 30 37
+OFF OFF OFF ON 08 30 38
+OFF OFF ON OFF 09 30 39
+OFF OFF ON ON 0A 31 30
+OFF ON OFF OFF 0B 31 31
+OFF ON OFF ON 0C 31 32
+OFF ON ON OFF 0D 31 33
+OFF ON ON ON 0E 31 34
+OFF OFF OFF OFF 0F 31 35
+
+Note: when Card reader/writer receives command bag from host machine, if character interval
+time of command bag is over 50MS, it will take it as overtime and void.
+
+Communication Procedure :
+
+Main controller Device
+COMMAND
+
+ACK(0X06)+ADDH+ADDL(If command format correct)
+NAK(0X15)+ADDH+ADDL(If format error)
+
+ENQ（0x05）
++ADDH+ADDL
+
+RESPONSE (Note 1)
+
+Note 1：If host machine sending command is belong to "Command list 2", the device does not return
+response. The host machine through sending check command “RF”(0X52 0X46) or “AP”(0X41 0X50)
+to get the results of performance
+
+第 2页，共 19页
+
+
+
+Note：
+[1]COMMAND：command packet
+[2] RESPONSE：response packet
+[3]ACK：Control character , length is one byte, active response, value =0x06
+[4]NAK：Control character , length is one byte, negative response, value =0x15
+[5]ENQ：Control character , length is one byte, execute command request, value =0x05
+[6]EOT：Control character , length is one byte, cancel command，value=0x04
+
+Note:
+
+[1]When machine use multiple-communication，the PC host can control 16set equipment through one
+serial port.
+[2]When machine use multiple-communication, the address of each machine must be set to unique.
+
+二：Command list 1
+Command Command name Comman Comm Command function
+serial d code and
+
+(CM) PM
+(PM)
+
+1 Contactless card S50 0x3B 0x30 Search card
+operation 0x31 Read serial number
+
+0x32 Check password
+0x33 Read card
+0x34 Write card
+0x35 Value operation initial
+0x36 Increment operation
+0x37 Devalue operation
+0x38 Close down
+0x39 Read EEPROM
+0x3a Write EEPROM
+0x3b Lead in password from EEPROM
+
+2 Contactless card S70 0x3C 0x30 Search card
+operation 0x31 Read serial number
+
+0x32 Check password
+0x33 Read card
+0x34 Write card
+0x35 Value operation initial
+0x36 Increment operation
+0x37 Devalue operation
+0x38 Close down
+0x39 Read EEPROM
+0x3a Write EEPROM
+0x3b Lead in password from EEPROM
+
+3 Contactless UL card 0x3D 0x30 Search card
+operation 0x31 Read serial number
+
+0x32 Read card
+0x33 Write card
+0x34 Close down
+
+第 3页，共 19页
+
+
+
+4 Contactless CPU 0x47 0x30 Activate card
+card operation 0x31 Restore response request
+(ISO14443 TYPEA) 0x32 PPS request
+
+0x33 Send APDU command
+0x34 DESELECT request
+0x35 Halt command
+
+6 15693 Card 0x48 0x30 Content request
+0x31 Read card
+0x32 Write card
+0x33 Choose
+0x34 Read system info
+0x35 Read secure states
+0x36 Write DSFID
+0x37 Write AFI
+0x3a Lock block
+0x3b Lock AFI
+0x3c Lock DSFID
+0x30 Content request
+
+Command list 2
+
+Command name Code
+Dispense card to front holding position “DC”(0X44 0X43)
+Check “RF”(0X52 0X46)
+Check “AP”(0X41 0X50)
+Recycle card “CP”(0X43 0X50)
+Collect card to card hopper “DB”(0X44 0X42)
+Reset “RS”(0X52 0X53)
+Get version “GV”(0X47 0X56)
+Buffer enable “BE”(0X42 0X45)
+Buffer disable “BD”(0X42 0X44)
+Set baud rate “CS2”(0X43 0X53 0X32) 4800
+
+“CS3”(0X43 0X53 0X33) 9600
+“CS4”(0X43 0X53 0X34) 19200
+“CS5”(0X43 0X53 0X34) 38400
+
+Dispense card at sensor 2 position “FC6”(0X46 0X43 0X36)
+Get version “GV”(0X47 0X56)
+Dispense card at read card position “FC7”(0X46 0X43 0X37)
+Dispense card at hold card position “FC4”(0X46 0X43 0X34)
+Dispense card out of card mouth “FC0”(0X46 0X43 0X30)
+Enter card to read position from front-side “FC8”(0X46 0X43 0X38)
+
+第 4页，共 19页
+
+
+
+LED Control function(Optional item)
+CM PM SE_DATAB Note
+“L” “P” 0x00 Always light on
+
+0x01 1 time/Sec
+0x02 2 times/sec
+0x03 3times/sec
+0x04 4times/sec
+0x05 5times/sec
+0x06 6times/sec
+0x07 7times/sec
+0x08 8times/sec
+0x09 9times/sec
+0x0A 10times/sec
+0x0B 11times/sec
+0X0C 12times/sec
+0X0D 13times/sec
+
+0X0E 14times/sec
+
+0X0F 15times/sec
+0X82 1 times/sec
+0X83 1 time/3 sec
+0X84 1 time /4 sec
+0X85 1time/5 sec
+0X86 1time/6
+0X87 1time/7 sec
+0X88 1time/8 sec
+0X89 1time/9 sec
+0X8A 1time/10 sec
+0X8B 1time/11 sec
+0X8C 1time/12 sec
+0X8D 1time/13 sec
+0X8E 1time/14 sec
+0X8F 1time/15 sec
+
+“L” “F” LED closed
+
+第 5页，共 19页
+
+
+
+Send “AP” or “RF” command will get below states
+Hexadecimal Binary States
+0x38 0x30 0x30 0x30 1000 0000 0000 0000 Recycling box full
+0x34 0x30 0x30 0x30 0100 0000 0000 0000 Could not implement command
+0x31 0x30 0x30 0x30 0001 0000 0000 0000 Card hopper pre-full, See below
+
+note 1
+
+0x30 0x38 0x30 0x30 0000 1000 0000 0000 Sending card
+0x30 0x34 0x30 0x30 0000 0100 0000 0000 Collecting card
+0x30 0x32 0x30 0x30 0000 0010 0000 0000 Error of issuing card
+0x30 0x31 0x30 0x30 0000 0001 0000 0000 Error of recycling card
+0x30 0x30 0x38 0x30 0000 0000 1000 0000 Card hopper full(only used for
+
+k750)
+0x30 0x30 0x34 0x30 0000 0000 0100 0000 Card overlap
+0x30 0x30 0x32 0x30 0000 0000 0010 0000 Card jam
+0x30 0x30 0x31 0x30 0000 0000 0001 0000 Card pre-empty
+0x30 0x30 0x30 0x38 0000 0000 0000 1000 Card empty
+0x30 0x30 0x30 0x34 0000 0000 0000 0100 Card at sensor 3 position
+0x30 0x30 0x30 0x32 0000 0000 0000 0010 Card at sensor 2 position
+0x30 0x30 0x30 0x31 0000 0000 0000 0001 Card at sensor 1 position
+
+Note 1：
+K750 and K730 without card pre-dispensing function
+
+第 6页，共 19页
+
+
+
+三：Command detailed manual
+=======================================================================
+
+Control and set command of machine
+=======================================================================
+
+Dispense card process：
+Main host Dispenser
+
+Check command（AP or RF）
+ACK+ADDR
+
+ENQ+ADDR
+
+Return working/card hopper states
+Dispense card command
+
+（Card hopper have card and no error of machine, otherwise continued check）
+ACK+ADDR
+
+ENQ+ADDR Implement dispensing action and restore this states
+
+Continued check card hopper states
+
+Note： （1）Check machine states before dispensing card, No error then can start implement
+dispensing command.
+
+（2）Do not implement another command before a command process does not finished.
+(3) Two check states must interval 200ms;
+
+1. Check states（”AP”）
+1．1、Host send
+0x02 ADD ADD 0x00 0x02 “A” “P” 0x03 BCC
+
+H L
+
+Return：
+0x02 ADDH ADDL 0X00 0X06 “ “ Machine 0x03 BCC
+
+S F states （ 4
+” ” bytes）
+
+1.2 Check states（”RF”）
+Host send：
+
+0x02 A A 0x00 0x02 “R” “F” 0x03 BCC
+D D
+D D
+H L
+
+Return
+
+第 7页，共 19页
+
+
+
+0x02 ADDH ADDL 0X00 0X05 “ “F Machine 0x03 BCC
+S ” states （ 3
+” bytes）
+
+Command list 2 and LED command operation manual：
+Communication process：
+
+Host Dispenser
+LED Control command
+
+ACK+ADDR
+ENQ+ADDR Implement LED command
+
+Host send：
+0x02 A A 0x0 0x02(2 The first The second The third 0x03 BCC
+
+D D 0 bytes byte of byte of byte of
+D D command) command command command
+H L 0x03(3
+
+bytes
+command)
+
+Note：(1)Command list 2 and LED control command decide the third byte command
+
+=======================================================================
+Contactless card operation command
+
+Note：All below commands are bring address，no marked means eliding,send/return response all
+must bring address .
+1、S50 card command
+1．1、Search card
+0x02 ADDH ADDL 0x00 0x02 0x3B 0x30 0X03 BCC
+Return successfully：
+0x02 ADDH ADDL 0X00 0X03 0x50 0x3B 0x30 0x03 BCC
+
+Return with failure：
+0x02 ADD ADD 0X00 0X04 0x4E 0x3 0x30 ERR_C 0X03 BCC
+
+H L B D
+
+Note：The address （ADDH、ADDL）of below commands been elided，when you send/return
+command must add address( ADDH.ADDL), the format see above "search card" command
+
+1．2、Read card serial no
+0x02 0x00 0x02 0x3B 0x31 0X03 BCC
+Return successfull：
+0x02 RELEN_H RELE 0x50 0x3 0x31 Card serial 0x03 BCC
+
+N_L B no
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x31 ERR_CD 0X03 BCC
+
+第 8页，共 19页
+
+
+
+1．3、Check password
+0x02 0X 0X0 0x3 0x3 Block PSW 6 bytes 0X03 BCC
+
+00 A B 2 address type PSW
+Note：
+PSW type:=0X30,check KEYA;=0X31,check KEYB
+Password(PSW)：Length is 6 bytes sector password
+Return successfull：
+0x02 0x00 0x03 0x50 0x3B 0x32 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x32 ERR_CD 0X03 BCC
+
+1．4、Read data
+0x02 0x00 0x03 0x3B 0x33 Block Addr 0X03 BCC
+Return successfull：
+0x02 0x0 0x13 0x50 0x3B 0x33 16 bytes data block 0x03 BCC
+
+0
+Return with failure：
+0x02 0X00 0X 0x4E 0x3B ERR_CD 0X03 BCC
+
+04 0x33
+
+1．5、Write data
+0x02 0x00 0x13 0x3B 0x34 Block 16 bytes data 0X03 BCC
+
+Addr block
+Return successfull：
+0x02 0x00 0x03 0x50 0x3B 0x34 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x34 ERR_CD 0X03 BCC
+
+1．6、Value initial operation
+0x02 0x00 0x13 0x3B 0x35 Block 16 bytes data 0X03 BCC
+
+Addr block
+Return successfull：
+0x02 0x00 0x03 0x50 0x3B 0x35 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x35 ERR_CD 0X03 BCC
+Note: Initialized value format as below
+
+0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+Value /Value Value Ad /Ad Ad /Ad
+
+r r r r
+Value: Need to initialize 4 byte value, low byte at front, high byte at behind.
+/Value: Negate the 4 byte value which need to initialize
+Adr: Need to initialize value's block address
+
+Adr= sector number X 4 + block number (S50 card 0-15 sector，S70 card the 0 –31
+sector block value operation address calculation)
+
+Adr=（ sector number – 32 ） X 16 + 128 + block number （ S70 card the 32 –
+39 sector block value operation address calculation）
+
+/Adr: Negate the block address which you need to initialize value
+Noted：！For each sector last block, please do not operate their value.
+
+第 9页，共 19页
+
+
+
+E.g： Make the five sector block initialization value 0 to 10, write data to 16 byte sector block is:
+“ 0x0A, 0x00, 0x00, 0x00, 0xF5 0xFF,0xFF ,0xFF , 0x0A, 0x00, 0x00, 0x00, 0x14, 0xEB,
+
+0x14, 0xEB ”
+For s70 card,make the 39 sector block initialization value 0 to 10, write data to 16 byte
+
+sector block is:
+“ 0x0A, 0x00, 0x00, 0x00, 0xF5, 0xFF,0xFF ,0xFF , 0x0A, 0x00, 0x00, 0x00, 0xF0, 0x0F,
+
+0XF0, 0x0F ”
+
+1．7、Increment operation
+0x02 0x00 0x07 0x3B 0x36 Block 4 bytes increment 0X03 BCC
+
+Addr data
+Note: Increment data, low byte at front, high byte at behind
+Return successfull：
+0x02 0x00 0x03 0x50 0x3B 0x36 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x36 ERR_CD 0X03 BCC
+4 byte hex data is appointed sector,appointed block value need to increase value.(low byte at front,
+high byte at behind)
+If need to increase 0x10，send 4 byte hex data is：“ 0x10, 0x00, 0x00, 0x00 ”
+
+1．8、Decrement operation
+0x02 0x00 0x07 0x3B 0x37 Block 4 bytes decrement 0X03 BCC
+
+Addr data
+Note: Devalue data, low byte at front,high byte at behind.
+
+Return successfull：
+0x02 0x00 0x03 0x50 0x3B 0x37 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x37 ERR_CD 0X03 BCC
+4 byte hex Data is appointed sector and appointed block value need to increase value.(low byte at
+front, high byte at behind)
+If need to decrease 0x10，send 4 byte hex data is：“ 0x10, 0x00, 0x00, 0x00 ”
+
+1．9、Read eeprom
+0x02 0x00 0x03 0x3B 0x38 MSB LSB LEN 0X03 BCC
+Return successfull：
+0x02 0x00 0x13 0x50 0x3B 0x38 Data 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x38 ERR_CD 0X03 BCC
+Parameter not：
+MSB：EEPROM address, high 8 bits
+LSB：EEPROM address, low 8 bits
+LEN：Read length
+
+1．10、Write eeprom
+0x02 0x00 0x03 0x3B 0x39 MSB LSB LEN DATA 0X03 BCC
+Return successfull：
+0x02 0x00 0x13 0x50 0x3B 0x39 0x03 BCC
+
+第 10页，共 19页
+
+
+
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x39 ERR_CD 0X03 BCC
+Parameter note：
+MSB：EEPROM address, high 8 bits
+LSB：EEPROM address, low 8 bits
+LEN：Write data length
+DATA：Write data
+
+1．11、Import password from EEPROM
+0x02 0x00 0x03 0x3B 0x3a MSB LSB 0X03 BCC
+Return successfull：
+0x02 0x00 0x13 0x50 0x3B 0x3a 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3B 0x3a ERR_CD 0X03 BCC
+Parameter note：
+MSB：EEPROM address, high 8 bits
+LSB：EEPROM address,low 8 bits
+
+2、S70 card command
+2．1、Search card
+0x02 0x00 0x02 0x3C 0x30 0X03 BCC
+Return successfull：
+0x02 0X00 0X03 0x50 0x3C 0x30 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3C 0x30 ERR_CD 0X03 BCC
+
+2．2、Read serial number
+0x02 0x00 0x02 0x3C 0x31 0X03 BCC
+Return successfull：
+0x02 0X00 0X07 0x50 0x3C 0x31 4 bytes card serial 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3C 0x31 ERR_CD 0X03 BCC
+
+2．3、Check password
+0x02 0x00 0x0A 0x3C 0x32 Block PSW 6 0X03 BCC
+
+Addr type bytes
+PSW
+
+Return successfull：
+0x02 0x00 0x03 0x50 0x3C 0x32 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3C 0x32 ERR_CD 0X03 BCC
+
+2．4、Read data
+0x02 0x00 0x03 0x3C 0x33 Block 0X03 BCC
+
+Addr
+Return successfull：
+0x02 0x00 0x13 0x50 0x3C 0x33 16 bytes data 0x03 BCC
+
+第 11页，共 19页
+
+
+
+block
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3C 0x33 ERR_CD 0X03 BCC
+
+2．5、Write data
+0x02 0x00 0x13 0x3C 0x34 Block 16 bytes data 0X03 BCC
+
+Addr block
+Return successfull：
+0x02 0x00 0x03 0x50 0x3C 0x34 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3C 0x34 ERR_CD 0X03 BCC
+
+2．6、Value initialize operation
+0x02 0x00 0x13 0x3C 0x35 Block 16 bytes data 0X03 BCC
+
+Addr block
+Return successfull：
+0x02 0x00 0x03 0x50 0x3C 0x35 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3C 0x35 ERR_CD 0X03 BCC
+Initialized value format as below
+0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+Value /Value Value Ad /Ad Ad /Ad
+
+r r r r
+“ 0x0A, 0x00, 0x00, 0x00, 0xF5, 0xFF,0xFF ,0xFF , 0x0A, 0x00, 0x00, 0x00, 0xF0, 0x0F,
+
+0XF0, 0x0F ”
+Value: Need to initialize 4 byte value, low byte at front, high byte at behind.
+/Value: Negate the 4 byte value which need to initialize
+Adr: Need to initialize value's block address
+
+Adr= sector number X 4 + block number (S50 card 0-15 sector，S70 card the 0 –31
+sector block value operation address calculation)
+
+Adr=（ sector number – 32 ） X 16 + 128 + block number （ S70 card the 32 –
+39 sector block value operation address calculation）
+
+/Adr: Negate the block address which you need to initialize value
+Noted：！For each sector last block, please do not operate their value.
+E.g： Make the five sector block initialization value 0 to 10, write data to 16 byte sector block is:
+
+“ 0x0A, 0x00, 0x00, 0x00, 0xF5 0xFF,0xFF ,0xFF , 0x0A, 0x00, 0x00, 0x00, 0x14, 0xEB,
+0x14, 0xEB ”
+
+For s70 card,make the 39 sector block initialization value 0 to 10, write data to 16 byte
+sector block is:
+
+“ 0x0A, 0x00, 0x00, 0x00, 0xF5, 0xFF,0xFF ,0xFF , 0x0A, 0x00, 0x00, 0x00, 0xF0, 0x0F,
+0XF0, 0x0F ”
+
+2．7、Increment operation
+0x02 0x00 0x07 0x3C 0x36 Block 4 bytes 0X03 BCC
+
+Addr increment
+data
+
+Note: Increment data, low byte at front, high byte at behind
+
+Return successfull：
+
+第 12页，共 19页
+
+
+
+0x02 0x00 0x03 0x50 0x3C 0x36 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3C 0x36 ERR_CD 0X03 BCC
+
+2．8、Decrement operation
+0x02 0x00 0x07 0x3C 0x37 Block 4 bytes 0X03 BCC
+
+Addr decrement
+data
+
+Note: Devalue data, low byte at front,high byte at behind.
+
+Return successfull：
+0x02 0x00 0x03 0x50 0x3C 0x37 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3C 0x37 ERR_CD 0X03 BCC
+
+2．9、Read eeprom
+0x02 0x00 0x03 0x3c 0x38 MSB LSB LEN 0X03 BCC
+Return successfull：
+0x02 0x00 0x13 0x50 0x3c 0x38 data 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3c 0x38 ERR_CD 0X03 BCC
+Parameter note：
+MSB：EEPROM address, high 8 bits
+LSB：EEPROM address,low 8 bits
+LEN：Read length
+
+2．10、Write eeprom
+0x02 0x00 0x03 0x3c 0x39 MSB LSB LEN DATA 0X03 BCC
+Return successfull：
+0x02 0x00 0x13 0x50 0x3c 0x39 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3c 0x39 ERR_CD 0X03 BCC
+Parameter note：
+MSB：EEPROM address, high 8 bits
+LSB：EEPROM address,low 8 bits
+LEN：Write data length
+DATA：Write data
+
+2．11、Import password from EEPROM
+0x02 0x00 0x03 0x3c 0x3a MSB LSB 0X03 BCC
+Return successfull：
+0x02 0x00 0x13 0x50 0x3c 0x3a 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3c 0x3a ERR_CD 0X03 BCC
+Parameter note：
+MSB：EEPROM address, high 8 bits
+
+第 13页，共 19页
+
+
+
+LSB：EEPROM address,low 8 bits
+
+3、UL card command
+3．1、Search card
+0x02 0x00 0x02 0x3D 0x30 0X03 BCC
+Return successfull：
+0x02 0x00 0x03 0x50 0x3D 0x30 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3D 0x30 ERR_CD 0X03 BCC
+
+3．2、Read serial number
+0x02 0x00 0x02 0x3D 0x31 0X03 BCC
+Return successfull：
+0x02 0x00 0x0a 0x50 0x3D 0x31 7 bytes serial no 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3D 0x31 ERR_CD 0X03 BCC
+
+3．3、Read operation
+0x02 0x00 0x03 0x3D 0x32 Block 0X03 BCC
+
+Addr
+Return successfull：
+0x02 0x00 0x13 0x50 0x3D 0x32 16 bytes data 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3D 0x32 ERR_CD 0X03 BCC
+
+3．4、Write operation
+0x02 0x00 0x13 0x3D 0x33 Block 16 bytes data 0X03 BCC
+
+Addr
+Return successfull：
+0x02 0x00 0x03 0x50 0x3D 0x33 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3D 0x33 ERR_CD 0X03 BCC
+Note：block address 0-1 only read could not be write, block address 2-3 with special meaning, please
+do not write in it.
+
+3．5、Close down
+0x02 0x00 0x07 0x3D 0x34 0X03 BCC
+Return successfull：
+0x02 0x00 0x03 0x50 0x3D 0x34 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x3D 0x34 ERR_CD 0X03 BCC
+
+4、TYPEA contactless smart card command
+4.1、Activate card
+
+0x02 0x00 0x03 0x47 0x30 0X03 BCC
+Return successfull：
+
+第 14页，共 19页
+
+
+
+0x02 LH LL 0x50 0x47 0x30 UID 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x47 0x30 ERR_CD 0X03 BCC
+Parameter note：
+[1]LH，package length high 8 bits. LL，package length low 8 bits
+4.2、Read reset response
+0x02 0x00 0x03 0x47 0x31 0X03 BCC
+Return successfull：
+0x02 LH LL 0x50 0x47 0x31 ATS 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x47 0x31 ERR_CD 0X03 BCC
+
+4.3、PPS request
+0x02 0x00 0x03 0x47 0x32 PPS0 PPS1 0X03 BCC
+Return successfull：
+0x02 LH LL 0x50 0x47 0x32 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x47 0x32 ERR_CD 0X03 BCC
+
+4.4、Protocol transmission
+0x02 SH SL 0x47 0x33 CH CAPDU 0X03 BCC
+Return successfull：
+0x02 LH LL 0x50 0x47 0x33 CH RAPDU 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x47 0x33 ERR_CD 0X03 BCC
+Parameter note：
+[1]CH：Link icon,=0x30 no link，=0x31 with link。
+[2]CAPDU：PCD command package
+[3]RAPDU：PICC return package
+[4]SH,send package length high 8 bits；SL，send package length low 8 bits
+
+4.5、DESELECT
+0x02 0x00 0x03 0x47 0x34 0X03 BCC
+Return successfull：
+0x02 LH LL 0x50 0x47 0x34 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x47 0x34 ERR_CD 0X03 BCC
+
+4.6、HALT
+0x02 0x00 0x03 0x47 0x35 0X03 BCC
+Return successfull：
+0x02 LH LL 0x50 0x47 0x35 0x03 BCC
+Return with failure：
+0x02 0X00 0X04 0x4E 0x47 0x35 ERR_CD 0X03 BCC
+
+5．15693 card command
+
+第 15页，共 19页
+
+
+
+5．1 Content request
+0x02 0x00 0x02 0x48 0x30 0x03 BCC
+
+Return successfull：
+0x02 0x00 0x0B 0x50 0x48 0x30 UID 0x03 BCC
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0X30 ERR_CD 0x03 BCC
+
+Return with failure2：
+0x02 0x00 0x05 0x4E 0X48 0X30 2 bytes 15693 error 0x03 BCC
+
+code
+Refer to 15693 《Response error definition》
+
+5．2 Read card
+Read without UID
+
+0x02 0x00 0x05 0x48 0x31 0x02 First Block Block Qty 0x03 BCC
+Addr
+
+Read with UID
+0x02 0x00 0x0D 0x48 0x31 0x22 UID First Block 0x03 BCC
+
+Block Qty
+Addr
+
+Return successfull：
+0x02 RELEN_H RELEN_L 0x50 0x48 0x31 Read data Read data 0x03 BCC
+
+length
+Return with failure1：
+
+0x02 0x00 0x04 0x4E 0X48 0X31 ERR_CD 0x03 BCC
+Return with failure2：
+
+0x02 0x00 0x05 0x4E 0X48 0X31 2 bytes 15693 error 0x03 BCC
+code
+
+Refer to 15693 《Response error definition》
+
+5．3 Write Card
+Write with UID
+0x02 RELEN_H RELEN_L 0x48 0x32 0x02 First Block data 0x03 BCC
+
+Block data
+Addr
+
+Write without UID
+0x02 RELEN_H RELEN_L 0x48 0x32 0x22 UID First Block Qty data 0x03 BCC
+
+Block
+Addr
+
+Return successfull：
+0x02 0x00 0x04 0x50 0x48 0x32 Success 0x03 BCC
+
+written block
+qty
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0x32 ERR_CD 0x03 BCC
+
+Return with failure2：
+0x02 0x00 0x05 0x4E 0X48 0x32 2 bytes15693 error 0x03 BCC
+
+code
+Refer to 15693 《Response error definition》
+
+第 16页，共 19页
+
+
+
+5.4 Choose card
+0x02 0x00 0x0B 0x48 0x33 0x22 UID 0x03 BCC
+
+Return successfull：
+0x02 0x00 0x04 0x50 0x48 0x33 0x00 0x03 BCC
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0x33 ERR_CD 0x03 BCC
+
+Return with failure2：
+0x02 0x00 0x05 0x4E 0X48 0x33 2 bytes 15693 error 0x03 BCC
+
+code
+Refer to 15693 《Response error definition》
+
+5．5 Read system info：02 00 0B 48 34 22 91 89 2F 5D 00 01 04 E0 03 DB
+Without UID
+
+0x02 0x00 0x03 0x48 0x34 0x02 0x03 BCC
+With UID
+
+0x02 0x00 0x0B 0x48 0x34 0x22 UID 0x03 BCC
+
+Return successfull：02 00 12 50 48 34 00 0F 91 89 2F 5D 00 01 04 E0 04 04 1B 03 01 03 A6
+0x02 RELEN_H RELEN_L 0x50 0x48 0x34 Return data EXT BCC
+
+Ico Info UID DSFID AFI Inf
+n Icon o
+
+file
+d
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0x34 ERR_CD 0x03 BCC
+
+Return with failure2：
+0x02 0x00 0x05 0x4E 0X48 0x34 2 bytes 15693 error 0x03 BCC
+
+code
+Refer to 15693 《Response error definition》
+
+5．6 Read security states：
+Without UID
+
+0x02 0x00 0x05 0x48 0x35 0x02 First Block Block Qty 0x03 BCC
+Addr
+
+With UID
+0x02 0x00 0x0D 0x48 0x35 0x22 UID First Block Block Qty 0x03 BCC
+
+Addr
+
+Return successfull：
+0x02 RELEN_H RELEN_L 0x50 0x48 0x35 Return Return Block EXT BCC
+
+data Qty
+Return with failure1：
+
+0x02 0x00 0x04 0x4E 0X48 0x35 ERR_CD 0x03 BCC
+Return with failure2：
+
+0x02 0x00 0x05 0x4E 0X48 0x35 2 bytes 15693 error 0x03 BCC
+code
+
+Refer to 15693 《Response error definition》
+
+第 17页，共 19页
+
+
+
+5．7 Write DSFI：02 00 0C 48 36 22 91 89 2F 5D 00 01 04 E0 04 03 DA
+With UID
+
+0x02 0x00 0x0c 0x48 0x36 0x22 UID Data（1 byte） 0x03 BCC
+Return successfull：
+
+0x02 0x00 0x04 0x50 0x48 0x36 0x00 0x03 BCC
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0x36 ERR_CD 0x03 BCC
+
+Return with failure2：
+0x02 0x00 0x05 0x4E 0X48 0x36 2 bytes 15693 error 0x03 BCC
+
+code
+Refer to 15693 《Response error definition》
+
+5．8 Write AFI：
+With UID
+
+0x02 0x00 0x0c 0x48 0x37 0x22 UID Data(1 byte) 0x03 BCC
+Return successfull：
+
+0x02 0x00 0x04 0x50 0x48 0x37 0x00 0x03 BCC
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0x37 ERR_CD 0x03 BCC
+
+Return with failure2：
+0x02 0x00 0x05 0x4E 0X48 0x37 2 bytes 15693 error 0x03 BCC
+
+code
+Refer to 15693 《Response error definition》
+
+5．9 Lock block：
+0x02 0x00 0x0c 0x48 0x3a 0x22 UID Block Addr 0x03 BCC
+
+Return successfull：
+0x02 0x00 0x04 0x50 0x48 0x3a 0x00 0x03 BCC
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0x3a ERR_CD 0x03 BCC
+
+Return with failure2：
+0x02 0x00 0x05 0x4E 0X48 0x3a 2 bytes 15693 error 0x03 BCC
+
+code
+Refer to 15693 《Response error definition》
+
+5．10 Lock AFI：
+0x02 0x00 0x0b 0x48 0x3b 0x22 UID 0x03 BCC
+
+Return successfull：
+0x02 0x00 0x04 0x50 0x48 0x3b 0x00 0x03 BCC
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0x3b ERR_CD 0x03 BCC
+
+Return with failure2：
+
+第 18页，共 19页
+
+
+
+0x02 0x00 0x05 0x4E 0X48 0x3b 2 bytes 15693 error 0x03 BCC
+code
+
+Refer to 15693 《Response error definition》
+
+5．11 Lock DSFID：
+0x02 0x00 0x0b 0x48 0x3c 0x22 UID 0x03 BCC
+
+Return successfull：
+0x02 0x00 0x04 0x50 0x48 0x3c 0x00 0x03 BCC
+
+Return with failure1：
+0x02 0x00 0x04 0x4E 0X48 0x3c ERR_CD 0x03 BCC
+
+Return with failure2：
+0x02 0x00 0x05 0x4E 0X48 0x3c 2 bytes 15693 error 0x03 BCC
+
+code
+Refer to 15693 《Response error definition》
+
+Error code Meaning
+Command error code
+0x00 Undefined command （sent non-existent command ）
+0x01 Command parameter error
+0x02 Command data error
+0x03 Command could not be executed
+0x04 Command execution fails
+Card operation error code-RF card
+
+0x41 Search card failure
+0x42 Read serial number failure
+0x43 Check password error
+0x44 Choose card error
+0x45 Read data failure
+0x46 Write data failure
+0x49 Increment failure
+0x4a Devalue failure
+
+第 19页，共 19页

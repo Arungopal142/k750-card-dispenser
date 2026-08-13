@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
-import { useK750 } from "../../../lib/k750-context";
-import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine } from "lucide-react";
+import { useK750, getK750Service } from "../../../lib/k750-context";
+import type { LogEntry } from "../../../lib/k750-service";
+import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Hand, Terminal } from "lucide-react";
 
-type ToastType = "success" | "error" | "info";
+type ToastType = "success" | "error" | "info" | "warning";
 
 function Toast({ message, type, onClose }: { message: string; type: ToastType; onClose: () => void }) {
-  const icons = { success: <CheckCircle2 className="w-4 h-4 text-green-500" />, error: <XCircle className="w-4 h-4 text-red-500" />, info: <Info className="w-4 h-4 text-blue-500" /> };
-  const bg = { success: "bg-green-50 border-green-200", error: "bg-red-50 border-red-200", info: "bg-blue-50 border-blue-200" };
+  const icons = { success: <CheckCircle2 className="w-4 h-4 text-green-500" />, error: <XCircle className="w-4 h-4 text-red-500" />, info: <Info className="w-4 h-4 text-blue-500" />, warning: <Info className="w-4 h-4 text-amber-500" /> };
+  const bg = { success: "bg-green-50 border-green-200", error: "bg-red-50 border-red-200", info: "bg-blue-50 border-blue-200", warning: "bg-amber-50 border-amber-200" };
   return (
     <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg border px-4 py-3 shadow-lg ${bg[type]}`} style={{ animation: "slideIn 0.3s ease" }}>
       {icons[type]}
@@ -29,7 +30,7 @@ function Badge({ label, color }: { label: string; color: "green" | "yellow" | "r
     gray: "bg-gray-100 text-gray-600 border-gray-200",
   };
   return (
-    <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-mono ${styles[color]}`}>
+    <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[13px] font-mono ${styles[color]}`}>
       {label}
     </span>
   );
@@ -45,7 +46,7 @@ function SensorDot({ label, active }: { label: string; active: boolean }) {
             : "bg-gray-200 border-gray-300"
         }`}
       />
-      <span className="text-[10px] font-mono text-gray-500">{label}</span>
+      <span className="text-[11px] font-mono text-gray-500">{label}</span>
     </div>
   );
 }
@@ -57,7 +58,11 @@ export default function DevicePage() {
   const [firmware, setFirmware] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [collectStep, setCollectStep] = useState(0);
+  const [collectStepMsg, setCollectStepMsg] = useState("");
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
+  const [commLog, setCommLog] = useState<LogEntry[]>([]);
+  const logEndRef = useRef<HTMLDivElement>(null);
 
   const showToast = (message: string, type: ToastType = "info") => {
     setToast({ message, type });
@@ -67,6 +72,22 @@ export default function DevicePage() {
   useEffect(() => {
     if (!loading && (!profile || profile.role !== "admin")) router.replace("/login");
   }, [profile, loading, router]);
+
+  useEffect(() => {
+    const svc = getK750Service();
+    const handler = (entry: LogEntry) => {
+      setCommLog((prev) => {
+        const next = [...prev, entry];
+        return next.length > 100 ? next.slice(-100) : next;
+      });
+    };
+    svc.onLog = handler;
+    return () => { svc.onLog = undefined; };
+  }, []);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [commLog]);
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -102,12 +123,45 @@ export default function DevicePage() {
     showToast(ok ? "Device reset successful" : "Reset failed", ok ? "success" : "error");
   };
   const handleEject = async () => {
+    if (service?.isFlowBusy) { showToast("Device busy — please wait.", "warning"); return; }
     setActionLoading("eject");
     showToast("Ejecting card...", "info");
-    const ok = await service?.ejectFC0();
+
+    // Attempt 1: Direct DC eject
+    let result = await service?.ejectDC();
+    if (result?.success) {
+      await service?.queryAP();
+      setActionLoading(null);
+      showToast("Card ejected", "success");
+      return;
+    }
+
+    // Attempt 2: RS reset → retry DC
+    showToast("Eject stuck — resetting device...", "info");
+    await service?.resetDevice();
+    await new Promise((r) => setTimeout(r, 3000));
+    await service?.queryAP();
+
+    showToast("Retrying eject...", "info");
+    result = await service?.ejectDC();
     await service?.queryAP();
     setActionLoading(null);
-    showToast(ok ? "Card ejected" : "Eject failed or timed out", ok ? "success" : "error");
+    showToast(result?.success ? "Card ejected after reset" : "Eject failed — card may be jammed. Remove manually.", result?.success ? "success" : "error");
+  };
+  const handleCollectCard = async () => {
+    if (actionLoading === "collect") return;
+    if (service?.isFlowBusy) { showToast("Device busy — please wait.", "warning"); return; }
+    setActionLoading("collect");
+    setCollectStep(0);
+    setCollectStepMsg("");
+    try {
+      const res = await service?.visitorCheckout((step, msg) => { setCollectStep(step); setCollectStepMsg(msg); });
+      if (res?.success) showToast("Card returned to recycle box", "success");
+      else showToast(res?.message || "Collect failed", "error");
+    } catch { showToast("Collect error", "error"); }
+    setActionLoading(null);
+    setCollectStep(0);
+    setCollectStepMsg("");
   };
   if (loading || !profile) {
     return (
@@ -143,7 +197,7 @@ export default function DevicePage() {
       : "Disconnected";
 
   return (
-    <div style={{ backgroundColor: "#f8fafc", minHeight: "100vh" }} className="p-6">
+    <div style={{ backgroundColor: "#f8fafc", minHeight: "100vh" }} className="p-4 md:p-6">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <div style={{ maxWidth: 1120, margin: "0 auto" }} className="space-y-6">
 
@@ -158,7 +212,7 @@ export default function DevicePage() {
             />
             <div>
               <div className="flex items-center gap-3">
-                <h1 style={{ fontSize: 24, fontWeight: 700, color: "#0f172a" }}>
+                <h1 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a" }}>
                   Device Status
                 </h1>
                 <span
@@ -172,7 +226,7 @@ export default function DevicePage() {
                   K750-001
                 </span>
               </div>
-              <p style={{ fontSize: 13, color: "#64748b", marginTop: 2 }}>
+              <p style={{ fontSize: 14, color: "#64748b", marginTop: 2 }}>
                 Real-time status and controls
               </p>
             </div>
@@ -323,7 +377,39 @@ export default function DevicePage() {
                 >
                   Reset
                 </button>
+                <button
+                  onClick={handleCollectCard}
+                  disabled={connState !== "connected" || actionLoading === "collect"}
+                  style={{
+                    backgroundColor: "#f1f5f9",
+                    border: "1px solid #cbd5e1",
+                    color: "#475569",
+                    borderRadius: 8,
+                    padding: "8px 16px",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    opacity: connState !== "connected" ? 0.4 : 1,
+                  }}
+                  className="hover:bg-gray-200 transition-colors disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {actionLoading === "collect" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Hand className="w-3.5 h-3.5" />}
+                  {actionLoading === "collect" ? "Collecting..." : "Collect Card"}
+                </button>
               </div>
+
+              {actionLoading === "collect" && (
+                <div style={{ marginTop: 8 }}>
+                  <div className="flex items-center gap-2" style={{ fontSize: 11, color: "#64748b" }}>
+                    <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{collectStep}/4</span>
+                    <span>{collectStepMsg}</span>
+                  </div>
+                  <div className="flex gap-1" style={{ marginTop: 6 }}>
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} style={{ height: 4, flex: 1, borderRadius: 2, backgroundColor: i <= collectStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {firmware && (
                 <div style={{ fontSize: 12, color: "#64748b" }}>
@@ -378,7 +464,7 @@ export default function DevicePage() {
                 <div className="flex justify-between items-center" style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
                   <span style={{ fontSize: 13, color: "#64748b" }}>Protocol</span>
                   <span style={{ fontSize: 13, fontWeight: 500, color: "#0f172a", fontFamily: "monospace" }}>
-                    RS-485
+                    RS-232
                   </span>
                 </div>
               </div>
@@ -455,13 +541,16 @@ export default function DevicePage() {
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {b1 === 0 ? (
                         <Badge label="Idle" color="green" />
+                      ) : b1 & 0x04 ? (
+                        <Badge label="Cannot execute" color="red" />
+                      ) : b1 & 0x02 ? (
+                        <Badge label="Prep failed" color="red" />
+                      ) : b1 & 0x08 ? (
+                        <Badge label="Recycle full" color="yellow" />
+                      ) : b1 & 0x01 ? (
+                        <Badge label="Hopper pre-full" color="yellow" />
                       ) : (
-                        <>
-                          {b1 & 0x08 && <Badge label="Recycle full" color="yellow" />}
-                          {b1 & 0x04 && <Badge label="Cannot execute" color="red" />}
-                          {b1 & 0x02 && <Badge label="Prep failed" color="red" />}
-                          {b1 & 0x01 && <Badge label="Hopper pre-full" color="yellow" />}
-                        </>
+                        <Badge label="Idle" color="green" />
                       )}
                     </div>
                   </div>
@@ -480,13 +569,16 @@ export default function DevicePage() {
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {b2 === 0 ? (
                         <Badge label="Idle" color="green" />
+                      ) : b2 & 0x02 ? (
+                        <Badge label="Issue error" color="red" />
+                      ) : b2 & 0x01 ? (
+                        <Badge label="Collect error" color="red" />
+                      ) : b2 & 0x04 ? (
+                        <Badge label="Collecting" color="yellow" />
+                      ) : b2 & 0x08 ? (
+                        <Badge label="Sending" color="yellow" />
                       ) : (
-                        <>
-                          {b2 & 0x08 && <Badge label="Sending" color="yellow" />}
-                          {b2 & 0x04 && <Badge label="Collecting" color="yellow" />}
-                          {b2 & 0x02 && <Badge label="Issue error" color="red" />}
-                          {b2 & 0x01 && <Badge label="Collect error" color="red" />}
-                        </>
+                        <Badge label="Idle" color="green" />
                       )}
                     </div>
                   </div>
@@ -505,13 +597,16 @@ export default function DevicePage() {
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {b3 === 0 ? (
                         <Badge label="OK" color="green" />
+                      ) : b3 & 0x04 ? (
+                        <Badge label="Overlap" color="red" />
+                      ) : b3 & 0x02 ? (
+                        <Badge label="Jam" color="red" />
+                      ) : b3 & 0x08 ? (
+                        <Badge label="Full" color="green" />
+                      ) : b3 & 0x01 ? (
+                        <Badge label="Pre-empty" color="yellow" />
                       ) : (
-                        <>
-                          {b3 & 0x08 && <Badge label="Full" color="green" />}
-                          {b3 & 0x04 && <Badge label="Overlap" color="red" />}
-                          {b3 & 0x02 && <Badge label="Jam" color="red" />}
-                          {b3 & 0x01 && <Badge label="Pre-empty" color="yellow" />}
-                        </>
+                        <Badge label="OK" color="green" />
                       )}
                     </div>
                   </div>
@@ -644,16 +739,16 @@ export default function DevicePage() {
         </div>
 
         {/* Bottom Action Buttons */}
-        <div
-          className="flex flex-wrap gap-3"
-          style={{
-            backgroundColor: "#ffffff",
-            border: "1px solid #e2e8f0",
-            borderRadius: 8,
-            padding: 16,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          }}
-        >
+          <div
+            className="flex flex-col sm:flex-row sm:flex-wrap gap-3"
+            style={{
+              backgroundColor: "#ffffff",
+              border: "1px solid #e2e8f0",
+              borderRadius: 8,
+              padding: 16,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            }}
+          >
           <button
             onClick={handleEject}
             disabled={connState !== "connected" || actionLoading === "eject"}
@@ -724,6 +819,419 @@ export default function DevicePage() {
             {actionLoading === "reset" && <Loader2 className="w-4 h-4 animate-spin text-red-500" />}
             {actionLoading === "reset" ? "Resetting..." : "Reset Device"}
           </button>
+          <button
+            onClick={handleCollectCard}
+            disabled={connState !== "connected" || actionLoading === "collect"}
+            style={{
+              backgroundColor: actionLoading === "collect" ? "#f59e0b" : "#d97706",
+              color: "#ffffff",
+              borderRadius: 8,
+              padding: "10px 20px",
+              fontSize: 13,
+              fontWeight: 600,
+              opacity: connState !== "connected" ? 0.5 : 1,
+            }}
+            className="hover:opacity-90 transition-opacity flex items-center gap-2 disabled:cursor-not-allowed"
+          >
+            {actionLoading === "collect" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Hand className="w-4 h-4" />}
+            {actionLoading === "collect" ? "Collecting..." : "Collect Card"}
+          </button>
+        </div>
+
+        {actionLoading === "collect" && (
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              border: "1px solid #e2e8f0",
+              borderRadius: 8,
+              padding: 16,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            }}
+          >
+            <div className="flex items-center gap-2" style={{ fontSize: 12, color: "#64748b" }}>
+              <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{collectStep}/4</span>
+              <span>{collectStepMsg}</span>
+            </div>
+            <div className="flex gap-1.5" style={{ marginTop: 8 }}>
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} style={{ height: 5, flex: 1, borderRadius: 3, backgroundColor: i <= collectStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
+              ))}
+            </div>
+            <div className="flex justify-between" style={{ marginTop: 6 }}>
+              {["Enable front", "Insert card", "Move to reader", "Return to box"].map((label, idx) => (
+                <span key={idx} style={{ fontSize: 9, color: idx + 1 <= collectStep ? "#2563eb" : "#94a3b8", fontWeight: idx + 1 === collectStep ? 600 : 400 }}>{label}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===== MACHINE COMMANDS (TESTING) ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            padding: 20,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <h2 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 16 }}>
+            Machine Commands (Testing)
+          </h2>
+
+          {/* Full Status Display */}
+          {s && (
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Full Status (AP Response)
+              </h3>
+              <div style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* Byte 1 — Machine Status */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>
+                      Byte 1 — Machine
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                      0x{s.raw.byte1.toString(16).padStart(2, "0").toUpperCase()}
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {[
+                        { bit: 0x08, label: "Recycle full" },
+                        { bit: 0x04, label: "Cannot execute" },
+                        { bit: 0x02, label: "Prep failed" },
+                        { bit: 0x01, label: "Hopper pre-full" },
+                      ].map(({ bit, label }) => (
+                        <div key={bit} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: (s.raw.byte1 & bit) ? "#ef4444" : "#e2e8f0" }} />
+                          <span style={{ fontFamily: "monospace", color: (s.raw.byte1 & bit) ? "#ef4444" : "#94a3b8" }}>
+                            {bit.toString(2).padStart(4, "0")}
+                          </span>
+                          <span style={{ color: "#64748b" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Byte 2 — Action Status */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>
+                      Byte 2 — Action
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                      0x{s.raw.byte2.toString(16).padStart(2, "0").toUpperCase()}
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {[
+                        { bit: 0x08, label: "Sending" },
+                        { bit: 0x04, label: "Collecting" },
+                        { bit: 0x02, label: "Issue error" },
+                        { bit: 0x01, label: "Collect error" },
+                      ].map(({ bit, label }) => (
+                        <div key={bit} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: (s.raw.byte2 & bit) ? "#ef4444" : "#e2e8f0" }} />
+                          <span style={{ fontFamily: "monospace", color: (s.raw.byte2 & bit) ? "#ef4444" : "#94a3b8" }}>
+                            {bit.toString(2).padStart(4, "0")}
+                          </span>
+                          <span style={{ color: "#64748b" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Byte 3 — Card Box */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>
+                      Byte 3 — Card Box
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                      0x{s.raw.byte3.toString(16).padStart(2, "0").toUpperCase()}
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {[
+                        { bit: 0x08, label: "Full (K750)" },
+                        { bit: 0x04, label: "Overlap" },
+                        { bit: 0x02, label: "Jam" },
+                        { bit: 0x01, label: "Pre-empty" },
+                      ].map(({ bit, label }) => (
+                        <div key={bit} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: (s.raw.byte3 & bit) ? "#ef4444" : "#e2e8f0" }} />
+                          <span style={{ fontFamily: "monospace", color: (s.raw.byte3 & bit) ? "#ef4444" : "#94a3b8" }}>
+                            {bit.toString(2).padStart(4, "0")}
+                          </span>
+                          <span style={{ color: "#64748b" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Byte 4 — Channel/Sensors */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>
+                      Byte 4 — Channel
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                      0x{s.raw.byte4.toString(16).padStart(2, "0").toUpperCase()}
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {[
+                        { bit: 0x08, label: "Empty" },
+                        { bit: 0x04, label: "S3 (Reader)" },
+                        { bit: 0x02, label: "S2 (Middle)" },
+                        { bit: 0x01, label: "S1 (Front)" },
+                      ].map(({ bit, label }) => (
+                        <div key={bit} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: (s.raw.byte4 & bit) ? "#22c55e" : "#e2e8f0" }} />
+                          <span style={{ fontFamily: "monospace", color: (s.raw.byte4 & bit) ? "#22c55e" : "#94a3b8" }}>
+                            {bit.toString(2).padStart(4, "0")}
+                          </span>
+                          <span style={{ color: "#64748b" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Command Buttons Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {/* Card Movement */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Card Movement
+              </h3>
+              <div className="flex flex-col gap-2">
+                {[
+                  { label: "DC — Eject to pickup", cmd: "dc", color: "#f97316" },
+                  { label: "FC7 — Move to reader", cmd: "fc7", color: "#2563eb" },
+                  { label: "FC6 — Move to sensor 2", cmd: "fc6", color: "#2563eb" },
+                  { label: "FC4 — Move to hold position", cmd: "fc4", color: "#2563eb" },
+                  { label: "FC0 — Drop from bayonet", cmd: "fc0", color: "#2563eb" },
+                  { label: "FC8 — Enter from front", cmd: "fc8", color: "#2563eb" },
+                  { label: "CP — Recycle to box", cmd: "cp", color: "#8b5cf6" },
+                  { label: "DB — Return to issuing box", cmd: "db", color: "#8b5cf6" },
+                ].map(({ label, cmd, color }) => (
+                  <button
+                    key={cmd}
+                    onClick={async () => {
+                      setActionLoading(cmd);
+                      let ok = false;
+                      switch (cmd) {
+                        case "dc": { const r = await service?.ejectDC(); ok = !!r?.success; break; }
+                        case "fc7": ok = !!(await service?.dispenseFC7()); break;
+                        case "fc6": ok = !!(await service?.moveFC6()); break;
+                        case "fc4": ok = !!(await service?.moveFC4()); break;
+                        case "fc0": { const r = await service?.ejectFC0(); ok = !!r?.success; break; }
+                        case "fc8": ok = !!(await service?.enterFC8()); break;
+                        case "cp": ok = !!(await service?.recycleCP()); break;
+                        case "db": ok = !!(await service?.returnDB()); break;
+                      }
+                      await service?.queryAP();
+                      setActionLoading(null);
+                      showToast(ok ? `${label.split("—")[0].trim()} OK` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color,
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: `1px solid ${color}30`,
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === cmd ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reset / FD Commands */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Reset &amp; FD Commands
+              </h3>
+              <div className="flex flex-col gap-2">
+                {[
+                  { label: "RS — Reset device", cmd: "rs", color: "#dc2626" },
+                  { label: "FD0 — Auto-sense enable", cmd: "fd0", color: "#059669" },
+                  { label: "FD1 — Manual entry mode", cmd: "fd1", color: "#059669" },
+                  { label: "FD2 — Reset, no action", cmd: "fd2", color: "#dc2626" },
+                  { label: "FD3 — Reset → issuing box", cmd: "fd3", color: "#dc2626" },
+                  { label: "FD4 — Reset → recycle box", cmd: "fd4", color: "#dc2626" },
+                ].map(({ label, cmd, color }) => (
+                  <button
+                    key={cmd}
+                    onClick={async () => {
+                      setActionLoading(cmd);
+                      let ok = false;
+                      switch (cmd) {
+                        case "rs": ok = !!(await service?.resetDevice()); break;
+                        case "fd0": showToast("FD0 sent — front auto-sense enabled", "success"); ok = true; break;
+                        case "fd1": showToast("FD1 sent — manual entry mode", "success"); ok = true; break;
+                        case "fd2": ok = !!(await service?.resetFD2()); break;
+                        case "fd3": ok = !!(await service?.resetFD3()); break;
+                        case "fd4": ok = !!(await service?.resetFD4()); break;
+                      }
+                      await service?.queryAP();
+                      setActionLoading(null);
+                      showToast(ok ? `${label.split("—")[0].trim()} OK` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color,
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: `1px solid ${color}30`,
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === cmd ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Query & Utility */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Query &amp; Utility
+              </h3>
+              <div className="flex flex-col gap-2">
+                {[
+                  { label: "AP — Query status", cmd: "ap", color: "#2563eb" },
+                  { label: "FC1 — Card position", cmd: "fc1", color: "#2563eb" },
+                  { label: "FR — Device settings", cmd: "fr", color: "#2563eb" },
+                  { label: "GV — Get version", cmd: "gv", color: "#2563eb" },
+                  { label: "BE — Buffer enable", cmd: "be", color: "#059669" },
+                  { label: "BD — Buffer disable", cmd: "bd", color: "#059669" },
+                ].map(({ label, cmd, color }) => (
+                  <button
+                    key={cmd}
+                    onClick={async () => {
+                      setActionLoading(cmd);
+                      let ok = false;
+                      let extra = "";
+                      switch (cmd) {
+                        case "ap": { const st = await service?.queryAP(); ok = !!st; extra = st ? `b1=0x${st.raw.byte1.toString(16).padStart(2,"0")} b2=0x${st.raw.byte2.toString(16).padStart(2,"0")} b3=0x${st.raw.byte3.toString(16).padStart(2,"0")} b4=0x${st.raw.byte4.toString(16).padStart(2,"0")}` : ""; break; }
+                        case "fc1": {
+                          const p = await service?.queryPosition();
+                          ok = !!p;
+                          extra = p ? `card=${p.transport} device=${p.device} box=${p.cardBox} retain=${p.retainBox}` : "not supported by this firmware";
+                          break;
+                        }
+                        case "fr": {
+                          const s2 = await service?.getDeviceSettings();
+                          ok = !!s2;
+                          extra = s2 ? `${s2.frontEntry}; ${s2.resetAction}` : "";
+                          break;
+                        }
+                        case "gv": { const v = await service?.getVersion(); ok = !!v; extra = v || ""; break; }
+                        case "be": ok = !!(await service?.bufferEnable()); break;
+                        case "bd": ok = !!(await service?.bufferDisable()); break;
+                      }
+                      setActionLoading(null);
+                      showToast(ok ? `${label.split("—")[0].trim()} OK${extra ? ": " + extra : ""}` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color,
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: `1px solid ${color}30`,
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === cmd ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ===== COMMUNICATION LOG ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <div className="flex items-center justify-between" style={{ padding: "12px 16px", borderBottom: "1px solid #e2e8f0" }}>
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4" style={{ color: "#64748b" }} />
+              <h2 style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>
+                Communication Log
+              </h2>
+              <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace" }}>
+                ({commLog.length})
+              </span>
+            </div>
+            <button
+              onClick={() => setCommLog([])}
+              style={{
+                fontSize: 11,
+                color: "#64748b",
+                padding: "4px 8px",
+                borderRadius: 4,
+                border: "1px solid #e2e8f0",
+              }}
+              className="hover:bg-gray-50 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+          <div
+            style={{
+              maxHeight: 300,
+              overflowY: "auto",
+              backgroundColor: "#1e293b",
+              borderRadius: "0 0 8px 8px",
+              padding: "8px 12px",
+              fontFamily: "monospace",
+              fontSize: 11,
+              lineHeight: "18px",
+            }}
+          >
+            {commLog.length === 0 && (
+              <div style={{ color: "#64748b", fontStyle: "italic" }}>No communication yet. Connect device and send commands.</div>
+            )}
+            {commLog.map((entry, i) => {
+              const time = new Date(entry.timestamp).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+              const isTX = entry.direction === "TX";
+              const isRX = entry.direction === "RX";
+              const color = isTX ? "#60a5fa" : isRX ? "#4ade80" : "#fbbf24";
+              return (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <span style={{ color: "#64748b", flexShrink: 0 }}>{time}</span>
+                  <span style={{ color, fontWeight: 600, flexShrink: 0, width: 20 }}>{entry.direction}</span>
+                  <span style={{ color: "#e2e8f0", wordBreak: "break-all" }}>
+                    {entry.hex}
+                    {entry.text && <span style={{ color: "#94a3b8" }}> — {entry.text}</span>}
+                  </span>
+                </div>
+              );
+            })}
+            <div ref={logEndRef} />
+          </div>
         </div>
 
       </div>
