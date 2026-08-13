@@ -1,20 +1,21 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "../lib/auth-context";
 import { ToastProvider } from "../lib/toast-context";
 import { K750Provider } from "../lib/k750-context";
 import FontSizeLoader from "./font-size-loader";
 
-const jakartaSans = Plus_Jakarta_Sans({
+const jakartaSans = localFont({
+  src: "./fonts/PlusJakartaSansVariable.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/GeistMonoVariable.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
