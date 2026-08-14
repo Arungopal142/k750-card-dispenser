@@ -81,6 +81,20 @@ export default function IssueCardPage() {
     commLogEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [commLog]);
 
+  const downloadLog = (log: LogEntry[], filename: string) => {
+    const lines = log.map((e) => {
+      const time = new Date(e.timestamp).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      return `${time} ${e.direction} ${e.hex}${e.text ? " — " + e.text : ""}`;
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Live list of cards currently out with a visitor. Subscribed for the whole
   // page (not just the exit tab) so a card issued on the other tab is already
   // there when the operator switches over. Errors are shown instead of
@@ -609,6 +623,12 @@ export default function IssueCardPage() {
               <Terminal className="w-4 h-4" /> Communication
               <span className="text-[10px] font-mono text-gray-400">({commLog.length})</span>
             </button>
+            {logTab === "comm" && commLog.length > 0 && (
+              <button onClick={() => downloadLog(commLog, `k750-comm-log-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.txt`)}
+                className="ml-auto flex items-center gap-1.5 px-4 py-2 text-[12px] font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors">
+                Save Log
+              </button>
+            )}
           </div>
 
           {logTab === "history" && (

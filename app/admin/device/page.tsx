@@ -102,6 +102,20 @@ export default function DevicePage() {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [commLog]);
 
+  const downloadLog = () => {
+    const lines = commLog.map((e) => {
+      const time = new Date(e.timestamp).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      return `${time} ${e.direction} ${e.hex}${e.text ? " — " + e.text : ""}`;
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `k750-device-log-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Live issue log subscription
   useEffect(() => {
     if (!user) return;
@@ -1443,19 +1457,35 @@ export default function DevicePage() {
                 ({commLog.length})
               </span>
             </div>
-            <button
-              onClick={() => setCommLog([])}
-              style={{
-                fontSize: 11,
-                color: "#64748b",
-                padding: "4px 8px",
-                borderRadius: 4,
-                border: "1px solid #e2e8f0",
-              }}
-              className="hover:bg-gray-50 transition-colors"
-            >
-              Clear
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={downloadLog}
+                disabled={commLog.length === 0}
+                style={{
+                  fontSize: 11,
+                  color: commLog.length === 0 ? "#cbd5e1" : "#2563eb",
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                  border: "1px solid #e2e8f0",
+                }}
+                className="hover:bg-gray-50 transition-colors"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => setCommLog([])}
+                style={{
+                  fontSize: 11,
+                  color: "#64748b",
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                  border: "1px solid #e2e8f0",
+                }}
+                className="hover:bg-gray-50 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
           </div>
           <div
             style={{
