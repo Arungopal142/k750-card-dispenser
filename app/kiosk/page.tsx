@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useK750 } from "../../lib/k750-context";
-import { ISSUE_STEP_LABELS, type IssueResult } from "../../lib/k750-service";
+import { useK750, getK750Conn } from "../../lib/k750-context";
+import { getK750Dispense, ISSUE_STEP_LABELS, type IssueResult } from "../../lib/k750-dispense";
 import { logCardIssue } from "../../lib/firestore-service";
 import { useToast } from "../../lib/toast-context";
 import { useAuth } from "../../lib/auth-context";
@@ -11,7 +11,7 @@ import CommLog from "../../components/CommLog";
 
 export default function KioskPage() {
   const { toast } = useToast();
-  const { service, connState, status: deviceStatus, connect } = useK750();
+  const { connState, status: deviceStatus, connect } = useK750();
   const { user, loginAnonymously, loading: authLoading, authError } = useAuth();
   const [authRetrying, setAuthRetrying] = useState(false);
   const triedAnonymous = useRef(false);
@@ -60,7 +60,7 @@ export default function KioskPage() {
     const nm = empName.trim();
     const dp = empDept.trim();
     try {
-      const res = await service.issueCard(id, nm, dp, (step, _total, msg) => {
+      const res = await getK750Dispense().issueCard(id, nm, dp, (step, _total, msg) => {
         setIssueStep(step);
         setIssueStepMsg(msg);
       });
@@ -147,7 +147,7 @@ export default function KioskPage() {
             </button>
           ) : (
             <button
-              onClick={() => service?.disconnect()}
+              onClick={() => getK750Conn().disconnect()}
               className="h-9 px-4 rounded-lg bg-gray-100 border border-gray-200 text-gray-600 text-xs font-bold flex items-center gap-2 active:scale-95 transition-transform"
             >
               <WifiOff className="w-3.5 h-3.5" /> Disconnect

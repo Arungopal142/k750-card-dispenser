@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
-import { useK750, getK750Service } from "../../../lib/k750-context";
-import { CHECKOUT_STEP_LABELS, ISSUE_STEP_LABELS, type LogEntry, type FlowProgress } from "../../../lib/k750-service";
+import { useK750, getK750Conn } from "../../../lib/k750-context";
+import { getK750Dispense, ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
+import { getK750Collect, CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
+import type { LogEntry } from "../../../lib/k750-connection";
 import { subscribeAllCardIssues, logCardIssue, updateCardIssue, logActivity, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Hand, Terminal, CreditCard, CreditCard as CardIcon } from "lucide-react";
 
@@ -55,7 +57,7 @@ function SensorDot({ label, active }: { label: string; active: boolean }) {
 export default function DevicePage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const { service, connState, status, connect, disconnect } = useK750();
+  const { conn, dispense, collect, connState, status, connect, disconnect } = useK750();
   const [firmware, setFirmware] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -87,7 +89,7 @@ export default function DevicePage() {
   }, [profile, loading, router]);
 
   useEffect(() => {
-    const svc = getK750Service();
+    const svc = getK750Conn();
     const handler = (entry: LogEntry) => {
       setCommLog((prev) => {
         const next = [...prev, entry];
@@ -139,14 +141,14 @@ export default function DevicePage() {
   };
   const handleRefresh = async () => {
     setActionLoading("refresh");
-    const st = await service?.queryAP();
+    const st = await conn.queryAP();
     setActionLoading(null);
     if (st) showToast("Status refreshed", "success");
     else showToast("No response from device", "error");
   };
   const handleGetVersion = async () => {
     setActionLoading("version");
-    const v = await service?.getVersion();
+    const v = await conn.getVersion();
     setActionLoading(null);
     if (v) { setFirmware(v); showToast(`Firmware: ${v}`, "success"); }
     else showToast("Could not get version", "error");
@@ -154,8 +156,8 @@ export default function DevicePage() {
   const handleReset = async () => {
     setActionLoading("reset");
     showToast("Resetting device...", "info");
-    const ok = await service?.resetDevice();
-    await service?.queryAP();
+    const ok = await conn.resetDevice();
+    await conn.queryAP();
     setActionLoading(null);
     showToast(ok ? "Device reset successful" : "Reset failed", ok ? "success" : "error");
   };
@@ -164,9 +166,9 @@ export default function DevicePage() {
     showToast("Ejecting card...", "info");
 
     // Attempt 1: Direct DC eject
-    let result = await service?.ejectDC();
+    let result = await conn.ejectDC();
     if (result?.success) {
-      await service?.queryAP();
+      await conn.queryAP();
       setActionLoading(null);
       showToast("Card ejected", "success");
       return;
@@ -174,13 +176,13 @@ export default function DevicePage() {
 
     // Attempt 2: RS reset → retry DC
     showToast("Eject stuck — resetting device...", "info");
-    await service?.resetDevice();
+    await conn.resetDevice();
     await new Promise((r) => setTimeout(r, 3000));
-    await service?.queryAP();
+    await conn.queryAP();
 
     showToast("Retrying eject...", "info");
-    result = await service?.ejectDC();
-    await service?.queryAP();
+    result = await conn.ejectDC();
+    await conn.queryAP();
     setActionLoading(null);
     showToast(result?.success ? "Card ejected after reset" : "Eject failed — card may be jammed. Remove manually.", result?.success ? "success" : "error");
   };
@@ -190,7 +192,7 @@ export default function DevicePage() {
     setCollectStep(0);
     setCollectStepMsg("");
     try {
-      const res = await service?.visitorCheckout((step, _total, msg) => { setCollectStep(step); setCollectStepMsg(msg); });
+      const res = await collect.visitorCheckout((step, _total, msg) => { setCollectStep(step); setCollectStepMsg(msg); });
       if (res?.success) {
         showToast(res.message, "success");
         if (res.warning) showToast(res.warning, "warning");
@@ -228,7 +230,7 @@ export default function DevicePage() {
     } catch { /* */ }
 
     try {
-      const res = await service?.issueCard(
+      const res = await dispense.issueCard(
         issueEmpId.trim(),
         issueEmpName.trim(),
         issueEmpDept.trim(),
@@ -1284,15 +1286,15 @@ export default function DevicePage() {
                       setActionLoading(cmd);
                       let ok = false;
                       switch (cmd) {
-                        case "fc7": ok = !!(await service?.dispenseFC7()); break;
-                        case "fc6": ok = !!(await service?.moveFC6()); break;
-                        case "fc4": ok = !!(await service?.moveFC4()); break;
-                        case "fc0": { const r = await service?.ejectFC0(); ok = !!r?.success; break; }
-                        case "fc8": ok = !!(await service?.enterFC8()); break;
-                        case "cp": ok = !!(await service?.recycleCP()); break;
-                        case "db": ok = !!(await service?.returnDB()); break;
+                        case "fc7": ok = !!(await conn.dispenseFC7()); break;
+                        case "fc6": ok = !!(await conn.moveFC6()); break;
+                        case "fc4": ok = !!(await conn.moveFC4()); break;
+                        case "fc0": ok = !!(await conn.ejectFC0()); break;
+                        case "fc8": ok = !!(await conn.enterFC8()); break;
+                        case "cp": ok = !!(await conn.recycleCP()); break;
+                        case "db": ok = !!(await conn.returnDB()); break;
                       }
-                      await service?.queryAP();
+                      await conn.queryAP();
                       setActionLoading(null);
                       showToast(ok ? `${label.split("—")[0].trim()} OK` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
                     }}
@@ -1337,14 +1339,14 @@ export default function DevicePage() {
                       setActionLoading(cmd);
                       let ok = false;
                       switch (cmd) {
-                        case "rs": ok = !!(await service?.resetDevice()); break;
-                        case "fd0": ok = !!(await service?.enableFrontAutoSense()); break;
-                        case "fd1": ok = !!(await service?.disableFrontAutoSense()); break;
-                        case "fd2": ok = !!(await service?.resetFD2()); break;
-                        case "fd3": ok = !!(await service?.resetFD3()); break;
-                        case "fd4": ok = !!(await service?.resetFD4()); break;
+                        case "rs": ok = !!(await conn.resetDevice()); break;
+                        case "fd0": ok = !!(await conn.enableFrontAutoSense()); break;
+                        case "fd1": ok = !!(await conn.disableFrontAutoSense()); break;
+                        case "fd2": ok = !!(await conn.resetFD2()); break;
+                        case "fd3": ok = !!(await conn.resetFD3()); break;
+                        case "fd4": ok = !!(await conn.resetFD4()); break;
                       }
-                      await service?.queryAP();
+                      await conn.queryAP();
                       setActionLoading(null);
                       showToast(ok ? `${label.split("—")[0].trim()} OK` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
                     }}
@@ -1390,22 +1392,22 @@ export default function DevicePage() {
                       let ok = false;
                       let extra = "";
                       switch (cmd) {
-                        case "ap": { const st = await service?.queryAP(); ok = !!st; extra = st ? `b1=0x${st.raw.byte1.toString(16).padStart(2,"0")} b2=0x${st.raw.byte2.toString(16).padStart(2,"0")} b3=0x${st.raw.byte3.toString(16).padStart(2,"0")} b4=0x${st.raw.byte4.toString(16).padStart(2,"0")}` : ""; break; }
+                        case "ap": { const st = await conn.queryAP(); ok = !!st; extra = st ? `b1=0x${st.raw.byte1.toString(16).padStart(2,"0")} b2=0x${st.raw.byte2.toString(16).padStart(2,"0")} b3=0x${st.raw.byte3.toString(16).padStart(2,"0")} b4=0x${st.raw.byte4.toString(16).padStart(2,"0")}` : ""; break; }
                         case "fc1": {
-                          const p = await service?.queryPosition();
+                          const p = await conn.queryPosition();
                           ok = !!p;
                           extra = p ? `card=${p.transport} device=${p.device} box=${p.cardBox} retain=${p.retainBox}` : "not supported by this firmware";
                           break;
                         }
                         case "fr": {
-                          const s2 = await service?.getDeviceSettings();
+                          const s2 = await conn.getDeviceSettings();
                           ok = !!s2;
                           extra = s2 ? `${s2.frontEntry}; ${s2.resetAction}` : "";
                           break;
                         }
-                        case "gv": { const v = await service?.getVersion(); ok = !!v; extra = v || ""; break; }
-                        case "be": ok = !!(await service?.bufferEnable()); break;
-                        case "bd": ok = !!(await service?.bufferDisable()); break;
+                        case "gv": { const v = await conn.getVersion(); ok = !!v; extra = v || ""; break; }
+                        case "be": ok = !!(await conn.bufferEnable()); break;
+                        case "bd": ok = !!(await conn.bufferDisable()); break;
                       }
                       setActionLoading(null);
                       showToast(ok ? `${label.split("—")[0].trim()} OK${extra ? ": " + extra : ""}` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");

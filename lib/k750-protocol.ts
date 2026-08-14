@@ -1,8 +1,8 @@
 export const STX = 0x02;
-export const ETX = 0x03;
+const ETX = 0x03;
 export const ACK = 0x06;
 export const NAK = 0x15;
-export const ENQ = 0x05;
+const ENQ = 0x05;
 
 export const DEFAULT_ADDH = 0x30;
 export const DEFAULT_ADDL = 0x30;
@@ -18,13 +18,6 @@ export function addressBytes(addr: number): { addH: number; addL: number } {
     throw new Error(`device address must be 0-15, got ${addr}`);
   }
   return { addH: 0x30 + Math.floor(addr / 10), addL: 0x30 + (addr % 10) };
-}
-
-export interface CardMapping {
-  employeeId: string;
-  name: string;
-  department: string;
-  issuedAt: string;
 }
 
 export interface StatusBytes {
@@ -57,33 +50,7 @@ export interface StatusFlags {
   cardAtSensor1: boolean;         // B4 bit0 (0x01) — card at front/entry position
 }
 
-// DC (Dispense Card to pickup) result types
-export type DCResultCode =
-  | "SUCCESS"                // confirmed: sensor transition observed
-  | "TARGET_NOT_CONFIRMED"   // no sensor activity observed — cannot verify card reached pickup
-  | "ACK_TIMEOUT"            // DC command not acknowledged
-  | "DEVICE_NAK"             // device rejected the command
-  | "COMMUNICATION_TIMEOUT"  // AP polling communication failed
-  | "DEVICE_ERROR"           // device reported an error (B1/B2)
-  | "CARD_JAM"               // B3 bit1
-  | "CARD_OVERLAP"           // B3 bit2
-  | "CARD_EMPTY"             // B4 bit3 — card box empty
-  | "CARD_PRE_EMPTY"         // B3 bit0 — card box nearly empty
-  | "MOVEMENT_TIMEOUT"       // exceeded EjectCard_Time without completion
-  | "NOT_CONNECTED"          // device not connected
-  | "DEVICE_BUSY";           // device busy with another operation
-
-export interface DCResult {
-  success: boolean;
-  confirmed: boolean;       // true only if sensor transition was observed
-  resultCode: DCResultCode;
-  message: string;
-  finalStatus?: { raw: StatusBytes; flags: StatusFlags; hex: string };
-  pollCount: number;
-  elapsed: number;
-}
-
-export function computeBCC(data: number[]): number {
+function computeBCC(data: number[]): number {
   let bcc = 0;
   for (const byte of data) {
     bcc ^= byte;
@@ -102,7 +69,7 @@ export function computeBCC(data: number[]): number {
  *   CP:  payload=[43,50]       → 02 30 30 00 02 43 50 03 10
  *   DB:  payload=[44,42]       → 02 30 30 00 02 44 42 03 05
  */
-export function buildPacket(
+function buildPacket(
   payload: number[],
   addH: number = DEFAULT_ADDH,
   addL: number = DEFAULT_ADDL
@@ -191,11 +158,6 @@ export function buildFC1Packet(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8A
   return buildPacket([0x46, 0x43, 0x31], addH, addL);
 }
 
-/** FC2 — raw sensor status. */
-export function buildFC2Packet(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
-  return buildPacket([0x46, 0x43, 0x32], addH, addL);
-}
-
 /** FR — parameter settings (front-entry mode, reset behaviour). */
 export function buildFRPacket(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
   return buildPacket([0x46, 0x52], addH, addL);
@@ -258,14 +220,14 @@ export function buildBDPacket(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Ar
 // --- Response parsing ---
 
 /** Parse one AP status nibble from an ASCII hex character byte (0x30–0x39, 0x41–0x46). */
-export function parseAPStatusNibble(byte: number): number {
+function parseAPStatusNibble(byte: number): number {
   const ch = String.fromCharCode(byte);
   if (/^[0-9A-Fa-f]$/.test(ch)) return parseInt(ch, 16);
   return byte & 0x0f;
 }
 
 /** Parse 4 AP status bytes (ASCII hex chars) into StatusBytes per vendor protocol. */
-export function parseAPStatusBytes(raw: number[]): StatusBytes {
+function parseAPStatusBytes(raw: number[]): StatusBytes {
   const b0 = raw[0] ?? 0;
   const b1 = raw[1] ?? 0;
   const b2 = raw[2] ?? 0;
@@ -328,7 +290,7 @@ export function getStatusFlags(status: StatusBytes): StatusFlags {
 
 // --- FC1 (card position) ---
 
-export type CardPosition =
+type CardPosition =
   | "OVERLAP" | "JAM" | "AT_READER" | "NO_CARD" | "AT_FRONT" | "UNKNOWN";
 
 export interface DevicePosition {
@@ -400,7 +362,7 @@ export function parseFRResponse(response: number[]): { frontEntry: string; reset
   return { frontEntry, resetAction, raw: data };
 }
 
-export function decodeErrorCode(code: number): string {
+function decodeErrorCode(code: number): string {
   const map: Record<number, string> = {
     0x00: "Undefined command",
     0x01: "Parameter error",

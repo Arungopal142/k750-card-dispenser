@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { getK750Service } from "../lib/k750-context";
-import type { LogEntry } from "../lib/k750-service";
+import { getK750Conn } from "../lib/k750-context";
+import type { LogEntry } from "../lib/k750-connection";
 import { Terminal, ChevronDown, ChevronUp } from "lucide-react";
 
 export default function CommLog() {
@@ -11,7 +11,7 @@ export default function CommLog() {
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const svc = getK750Service();
+    const svc = getK750Conn();
     if (!svc) return;
     const handler = (entry: LogEntry) => {
       setCommLog((prev) => [...prev.slice(-199), entry]);

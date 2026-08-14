@@ -1,11 +1,15 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from "react";
-import { K750Service, type ConnectionState, type DeviceStatus } from "./k750-service";
+import { K750Connection, type ConnectionState, type DeviceStatus } from "./k750-connection";
+import { DispenseService } from "./k750-dispense";
+import { CollectService } from "./k750-collect";
 import { ToastContext } from "./toast-context";
 
 interface K750ContextValue {
-  service: K750Service;
+  conn: K750Connection;
+  dispense: DispenseService;
+  collect: CollectService;
   connState: ConnectionState;
   status: DeviceStatus | null;
   connect: () => Promise<void>;
@@ -14,59 +18,62 @@ interface K750ContextValue {
 
 const K750Context = createContext<K750ContextValue | null>(null);
 
-let sharedService: K750Service | null = null;
-function getSharedService(): K750Service {
-  if (!sharedService) sharedService = new K750Service();
-  return sharedService;
+let sharedConn: K750Connection | null = null;
+let sharedDispense: DispenseService | null = null;
+let sharedCollect: CollectService | null = null;
+
+function getSharedServices() {
+  if (!sharedConn) sharedConn = new K750Connection();
+  if (!sharedDispense) sharedDispense = new DispenseService(sharedConn);
+  if (!sharedCollect) sharedCollect = new CollectService(sharedConn);
+  return { conn: sharedConn, dispense: sharedDispense, collect: sharedCollect };
 }
 
-/**
- * The same singleton the provider hands out. Use this inside effects that need
- * to attach callbacks to the service (onLog, …) so the mutation does not target
- * a value captured from render scope.
- */
-export function getK750Service(): K750Service {
-  return getSharedService();
+export function getK750Conn(): K750Connection {
+  return getSharedServices().conn;
+}
+
+export function getK750Dispense(): DispenseService {
+  return getSharedServices().dispense;
+}
+
+export function getK750Collect(): CollectService {
+  return getSharedServices().collect;
 }
 
 export function K750Provider({ children }: { children: ReactNode }) {
-  // The service is a module-level singleton, so read it directly instead of
-  // through a ref — reading ref.current during render is not allowed.
-  const service = getSharedService();
+  const { conn, dispense, collect } = getSharedServices();
   const toastCtx = useContext(ToastContext);
   const [connState, setConnState] = useState<ConnectionState>(
-    service.isConnected ? "connected" : "disconnected"
+    conn.isConnected ? "connected" : "disconnected"
   );
   const [status, setStatus] = useState<DeviceStatus | null>(null);
 
   useEffect(() => {
-    // Read the singleton here rather than closing over a render-scope value.
-    const svc = getSharedService();
-    svc.onConnectionChange = setConnState;
-    svc.onStatusChange = setStatus;
-    svc.onAutoReconnect = () => {
+    conn.onConnectionChange = setConnState;
+    conn.onStatusChange = setStatus;
+    conn.onAutoReconnect = () => {
       toastCtx?.toast("Device unresponsive — auto-reconnecting...", "warning");
     };
-    // No setConnState here: the useState initialiser above already seeds the
-    // connected state, and calling it synchronously in an effect just triggers
-    // an extra render pass.
-    if (svc.isConnected) svc.queryAP();
+    if (conn.isConnected) conn.queryAP();
     return () => {
-      svc.onConnectionChange = undefined;
-      svc.onStatusChange = undefined;
-      svc.onAutoReconnect = undefined;
+      conn.onConnectionChange = undefined;
+      conn.onStatusChange = undefined;
+      conn.onAutoReconnect = undefined;
     };
-  }, [toastCtx]);
+  }, [toastCtx, conn]);
 
   const value = useMemo(
     () => ({
-      service,
+      conn,
+      dispense,
+      collect,
       connState,
       status,
-      connect: async () => { try { await service.connect(); } catch { /* */ } },
-      disconnect: async () => { await service.disconnect(); setStatus(null); },
+      connect: async () => { try { await conn.connect(); } catch { /* */ } },
+      disconnect: async () => { await conn.disconnect(); setStatus(null); },
     }),
-    [service, connState, status]
+    [conn, dispense, collect, connState, status]
   );
 
   return <K750Context.Provider value={value}>{children}</K750Context.Provider>;

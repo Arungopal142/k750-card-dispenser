@@ -3,8 +3,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
-import { useK750, getK750Service } from "../../../lib/k750-context";
-import { ISSUE_STEP_LABELS, CHECKOUT_STEP_LABELS, type IssueResult, type LogEntry } from "../../../lib/k750-service";
+import { useK750, getK750Conn } from "../../../lib/k750-context";
+import { getK750Dispense, ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
+import { getK750Collect, CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
+import type { IssueResult } from "../../../lib/k750-dispense";
+import type { LogEntry } from "../../../lib/k750-connection";
 import { logActivity, subscribeIssuedCards, subscribeAllCardIssues, returnCard, logCardIssue, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { useToast } from "../../../lib/toast-context";
 import { Loader2, CreditCard, RotateCcw, AlertTriangle, CheckCircle, XCircle, Wifi, WifiOff, UserPlus, LogOut, Terminal, Clock } from "lucide-react";
@@ -15,7 +18,7 @@ export default function IssueCardPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
-  const { service, connState, status: deviceStatus, connect, disconnect } = useK750();
+  const { conn, dispense, collect, connState, status: deviceStatus, connect, disconnect } = useK750();
   const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabKey>("issue");
@@ -57,7 +60,7 @@ export default function IssueCardPage() {
 
   // Subscribe to device comm log
   useEffect(() => {
-    const svc = getK750Service();
+    const svc = getK750Conn();
     if (!svc) return;
     const handler = (entry: LogEntry) => {
       setCommLog((prev) => [...prev.slice(-99), entry]);
@@ -148,7 +151,7 @@ export default function IssueCardPage() {
     let cancelled = false;
     const tick = async () => {
       if (cancelled) return;
-      try { await service.queryAP(); } catch { /* */ }
+      try { await conn.queryAP(); } catch { /* */ }
       if (!cancelled) autoRefreshRef.current = setTimeout(tick, 1000);
     };
     autoRefreshRef.current = setTimeout(tick, 1000);
@@ -157,7 +160,7 @@ export default function IssueCardPage() {
       if (autoRefreshRef.current) clearTimeout(autoRefreshRef.current);
       autoRefreshRef.current = null;
     };
-  }, [autoRefresh, connState, issuing, exitRunning, service]);
+  }, [autoRefresh, connState, issuing, exitRunning, conn]);
 
   const handleConnect = async () => { try { await connect(); } catch { /* */ } };
   const handleDisconnect = async () => { await disconnect(); };
@@ -165,8 +168,8 @@ export default function IssueCardPage() {
   const handleReset = async () => {
     setResetting(true);
     toast("Resetting device...", "info");
-    const ok = await service?.resetDevice();
-    await service?.queryAP();
+    const ok = await conn.resetDevice();
+    await conn.queryAP();
     setResetting(false);
     toast(ok ? "Device reset successful" : "Reset failed — no response", ok ? "success" : "error");
   };
@@ -188,7 +191,7 @@ export default function IssueCardPage() {
     const dept = empDept.trim();
 
     try {
-      const res = await service.issueCard(id, name, dept, (step, _total, msg) => {
+      const res = await dispense.issueCard(id, name, dept, (step, _total, msg) => {
         setIssueStep(step);
         setIssueStepMsg(msg);
       });
@@ -256,7 +259,7 @@ export default function IssueCardPage() {
     setExitStep(0);
     setExitStepMsg("");
     try {
-      const res = await service.visitorCheckout((step, _total, msg) => { setExitStep(step); setExitStepMsg(msg); });
+      const res = await collect.visitorCheckout((step, _total, msg) => { setExitStep(step); setExitStepMsg(msg); });
       if (res) {
         if (res.success && card.id) {
           // The card is physically back in the machine. If this write fails the
