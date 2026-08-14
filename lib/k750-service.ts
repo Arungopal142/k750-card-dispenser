@@ -150,6 +150,7 @@ export class K750Service {
   private addL = DEFAULT_ADDL;
   private transactLock: Promise<void> = Promise.resolve();
   private _busy = false;
+  private _flowBusy = false;
   private _manualDisconnect = false;
   private _autoReconnect = true;
   private disconnectHandler?: (event: { port: SerialPort }) => void;
@@ -157,10 +158,10 @@ export class K750Service {
   private lastCommandTime = 0;
   private consecutiveFailures = 0;
   private _reconnecting = false;
-  private _deviceAddress = 0;
-  private _fc1Supported: boolean | null = null;
 
+  get isConnected(): boolean { return this._connected; }
   get isBusy() { return this._busy; }
+  get isFlowBusy() { return this._flowBusy; }
   get isFlowBusy() { return false; }
 
   onLog?: (entry: LogEntry) => void;
@@ -910,66 +911,78 @@ export class K750Service {
   // ---- Issue card (matching working reference) ----
   async issueCard(employeeId: string, name: string, department: string, onStep?: FlowProgress): Promise<IssueResult> {
     if (!this.isConnected) return { success: false, message: "Device not connected. Please connect first.", errorCode: "NOT_CONNECTED" };
+    if (this._flowBusy) return { success: false, message: "Device busy — an operation is already running.", errorCode: "DEVICE_BUSY" };
 
+    this._flowBusy = true;
     const step = (n: number, msg: string) => {
       onStep?.(n, ISSUE_STEPS, msg);
       this.log("INFO", [], `[ISSUE] ${msg}`);
     };
 
-    return this.runFlow(async () => {
-      try {
-        this.log("INFO", [], "=== Issue flow ===");
+    try {
+      this.log("INFO", [], "=== Issue flow ===");
 
-        // Step 1: Pre-check
-        step(1, "Checking machine...");
-        const pre = await this.queryAP();
-        if (!pre) {
-          return { success: false, message: "Cannot read the machine status — no response from the K750.", errorCode: "NO_RESPONSE" };
-        }
-        const { flags } = pre;
-        if (flags.boxEmpty) return { success: false, message: "Card box is empty.", errorCode: "BOX_EMPTY", status: pre };
-        if (pre.raw.byte4 & 0x07) return { success: false, message: "Card in channel — eject first.", errorCode: "CARD_IN_CHANNEL", status: pre };
-        if (flags.cardJam) return { success: false, message: "Card jam — press RS.", errorCode: "CARD_JAM", status: pre };
-        if (flags.cardOverlap) return { success: false, message: "Card overlap — press RS.", errorCode: "CARD_OVERLAP", status: pre };
-        if (flags.issueError) return { success: false, message: "Issue error — press RS.", errorCode: "ISSUE_ERROR", status: pre };
-        if (flags.collectError) return { success: false, message: "Collection error — press RS.", errorCode: "COLLECT_ERROR", status: pre };
-        if (flags.commandCannotExecute) return { success: false, message: "Command cannot execute.", errorCode: "COMMAND_REJECTED", status: pre };
-
-        // Step 2: FC7 dispense to reader
-        step(2, "Dispensing card...");
-        const fc7 = await this.dispenseFC7();
-        if (!fc7.ok) {
-          const errorCode = fc7.error === "BOX_EMPTY" ? "BOX_EMPTY"
-            : fc7.error === "CARD_JAM" ? "CARD_JAM"
-            : fc7.error === "CARD_OVERLAP" ? "CARD_OVERLAP"
-            : "FC7_TIMEOUT";
-          const errorMsg = fc7.error === "BOX_EMPTY" ? "Card box is empty."
-            : fc7.error === "CARD_JAM" ? "Card jam. Press RS."
-            : fc7.error === "CARD_OVERLAP" ? "Card overlap. Press RS."
-            : "Dispense failed — card did not reach reader.";
-          return { success: false, message: errorMsg, errorCode };
-        }
-
-        // Step 3: FC0 eject out of mouth
-        step(3, "Delivering card...");
-        this.log("INFO", [], "FC0: eject...");
-        const fc0Result = await this.ejectFC0();
-        if (!fc0Result.success) {
-          const errorCode = fc0Result.resultCode === "CARD_JAM" ? "CARD_JAM"
-            : fc0Result.resultCode === "CARD_OVERLAP" ? "CARD_OVERLAP"
-            : fc0Result.resultCode === "DEVICE_ERROR" ? "ISSUE_ERROR"
-            : "EJECT_TIMEOUT";
-          return { success: false, message: fc0Result.message, errorCode };
-        }
-
-        this.log("INFO", [], "=== SUCCESS ===");
-        return { success: true, message: `Card issued for ${name} (${employeeId} — ${department}) — please collect the card.` };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.log("INFO", [], `[ISSUE] FAILED: ${msg}`);
-        return { success: false, message: `Error: ${msg}`, errorCode: "UNKNOWN_ERROR" };
+      // Step 1: Pre-check
+      step(1, "Checking machine...");
+      const pre = await this.queryAP();
+      if (!pre) {
+        return { success: false, message: "Cannot read the machine status — no response from the K750.", errorCode: "NO_RESPONSE" };
       }
-    });
+      const { flags } = pre;
+      if (flags.boxEmpty) return { success: false, message: "Card box is empty.", errorCode: "BOX_EMPTY", status: pre };
+      if (flags.cardJam) return { success: false, message: "Card jam — press RS.", errorCode: "CARD_JAM", status: pre };
+      if (flags.cardOverlap) return { success: false, message: "Card overlap — press RS.", errorCode: "CARD_OVERLAP", status: pre };
+      if (flags.issueError) return { success: false, message: "Issue error — press RS.", errorCode: "ISSUE_ERROR", status: pre };
+      if (flags.collectError) return { success: false, message: "Collection error — press RS.", errorCode: "COLLECT_ERROR", status: pre };
+      if (flags.commandCannotExecute) return { success: false, message: "Command cannot execute.", errorCode: "COMMAND_REJECTED", status: pre };
+
+      // Auto-eject if card stuck in channel from previous failed flow
+      if (pre.raw.byte4 & 0x07) {
+        this.log("INFO", [], "Card in channel — auto ejecting before dispense...");
+        step(1, "Clearing channel...");
+        const ejectResult = await this.ejectFC0();
+        if (!ejectResult.success) {
+          return { success: false, message: "Card stuck in channel — eject failed. Press RS.", errorCode: "CARD_IN_CHANNEL", status: pre };
+        }
+        await this.delay(500);
+      }
+
+      // Step 2: FC7 dispense to reader
+      step(2, "Dispensing card...");
+      const fc7 = await this.dispenseFC7();
+      if (!fc7.ok) {
+        const errorCode = fc7.error === "BOX_EMPTY" ? "BOX_EMPTY"
+          : fc7.error === "CARD_JAM" ? "CARD_JAM"
+          : fc7.error === "CARD_OVERLAP" ? "CARD_OVERLAP"
+          : "FC7_TIMEOUT";
+        const errorMsg = fc7.error === "BOX_EMPTY" ? "Card box is empty."
+          : fc7.error === "CARD_JAM" ? "Card jam. Press RS."
+          : fc7.error === "CARD_OVERLAP" ? "Card overlap. Press RS."
+          : "Dispense failed — card did not reach reader.";
+        return { success: false, message: errorMsg, errorCode };
+      }
+
+      // Step 3: FC0 eject out of mouth
+      step(3, "Delivering card...");
+      this.log("INFO", [], "FC0: eject...");
+      const fc0Result = await this.ejectFC0();
+      if (!fc0Result.success) {
+        const errorCode = fc0Result.resultCode === "CARD_JAM" ? "CARD_JAM"
+          : fc0Result.resultCode === "CARD_OVERLAP" ? "CARD_OVERLAP"
+          : fc0Result.resultCode === "DEVICE_ERROR" ? "ISSUE_ERROR"
+          : "EJECT_TIMEOUT";
+        return { success: false, message: fc0Result.message, errorCode };
+      }
+
+      this.log("INFO", [], "=== SUCCESS ===");
+      return { success: true, message: `Card issued for ${name} (${employeeId} — ${department}) — please collect the card.` };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.log("INFO", [], `[ISSUE] FAILED: ${msg}`);
+      return { success: false, message: `Error: ${msg}`, errorCode: "UNKNOWN_ERROR" };
+    } finally {
+      this._flowBusy = false;
+    }
   }
 
   async issueVisitorCard(visitorName: string, company: string, host: string, onStep?: FlowProgress): Promise<IssueResult> {
@@ -980,7 +993,9 @@ export class K750Service {
   // ---- Card return (matching working reference) ----
   async visitorCheckout(onStep?: FlowProgress): Promise<IssueResult> {
     if (!this.isConnected) return { success: false, message: "Device not connected.", errorCode: "NOT_CONNECTED" };
+    if (this._flowBusy) return { success: false, message: "Device busy — an operation is already running.", errorCode: "DEVICE_BUSY" };
 
+    this._flowBusy = true;
     let fd0Enabled = false;
     const step = (n: number, msg: string) => {
       onStep?.(n, CHECKOUT_STEPS, msg);
@@ -1054,6 +1069,7 @@ export class K750Service {
       this.log("INFO", [], `Card return FAILED: ${msg}`);
       return { success: false, message: `Error: ${msg}`, errorCode: "UNKNOWN_ERROR" };
     } finally {
+      this._flowBusy = false;
       if (fd0Enabled) {
         await this.sendCmdList2(buildFD1Packet(this.addH, this.addL)).catch(() => {});
       }
