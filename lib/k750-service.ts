@@ -1371,6 +1371,10 @@ export class K750Service {
           await this.sendCmdList2(buildFD1Packet(this.addH, this.addL));
           fd0Enabled = false;
           this.log("INFO", [], "=== VISITOR CHECKOUT SUCCESS ===");
+
+          this.log("INFO", [], "Step 5: FD2 — reset to idle...");
+          await this.resetFD2();
+
           return { success: true, message: `Card returned to the ${boxName}.`, status: st };
         }
       }
@@ -1463,6 +1467,10 @@ export class K750Service {
 
       this.log("INFO", [], "=== SUCCESS ===");
       const status = await this.queryAP();
+
+      this.log("INFO", [], "Step 5: FD2 — reset to idle...");
+      await this.resetFD2();
+
       return { success: true, message: `Card issued for ${name} (${employeeId} — ${department}) — please collect the card.`, status: status ?? undefined };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
