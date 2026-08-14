@@ -50,7 +50,6 @@ export default function KioskPage() {
   const handleIssue = async () => {
     if (!empId.trim() || !empName.trim() || !empDept.trim()) return;
     if (issuing || connState !== "connected" || !user) return;
-    if (service.isFlowBusy) { toast("Machine busy — please wait.", "warning"); return; }
     setIssuing(true);
     setResult(null);
     setIssued(false);

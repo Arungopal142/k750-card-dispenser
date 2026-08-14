@@ -160,7 +160,6 @@ export default function DevicePage() {
     showToast(ok ? "Device reset successful" : "Reset failed", ok ? "success" : "error");
   };
   const handleEject = async () => {
-    if (service?.isFlowBusy) { showToast("Device busy — please wait.", "warning"); return; }
     setActionLoading("eject");
     showToast("Ejecting card...", "info");
 
@@ -187,7 +186,6 @@ export default function DevicePage() {
   };
   const handleCollectCard = async () => {
     if (actionLoading === "collect") return;
-    if (service?.isFlowBusy) { showToast("Device busy — please wait.", "warning"); return; }
     setActionLoading("collect");
     setCollectStep(0);
     setCollectStepMsg("");
@@ -211,7 +209,6 @@ export default function DevicePage() {
       return;
     }
     if (connState !== "connected") { showToast("Connect to device first", "error"); return; }
-    if (service?.isFlowBusy) { showToast("Device busy", "warning"); return; }
     setIssuing(true);
     setIssueResult(null);
     setIssueStep(0);

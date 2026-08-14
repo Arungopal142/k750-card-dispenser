@@ -182,14 +182,13 @@ export class K750Service {
   private lastAPQueryTime = 0;
   private lastCommandTime = 0;
   private consecutiveFailures = 0;
-  private _flowBusy = false;
   private _reconnecting = false;
   private _deviceAddress = 0;
   /** null = not probed yet, true/false = firmware answers FC1 or not. */
   private _fc1Supported: boolean | null = null;
 
   get isBusy() { return this._busy; }
-  get isFlowBusy() { return this._flowBusy; }
+  get isFlowBusy() { return false; }
 
   onLog?: (entry: LogEntry) => void;
   onStatusChange?: (status: DeviceStatus | null) => void;
@@ -210,19 +209,13 @@ export class K750Service {
     }
   }
 
-  /** Guard a full issue/checkout flow. Prevents concurrent flows while allowing
-   *  background queryAP polls (which only set _busy, not _flowBusy). */
-  private runFlow<T>(fn: () => Promise<T>): Promise<T | { success: false; message: string; errorCode: "DEVICE_BUSY" | "UNKNOWN_ERROR" }> {
-    return new Promise<T | { success: false; message: string; errorCode: "DEVICE_BUSY" | "UNKNOWN_ERROR" }>((resolve) => {
-      if (this._flowBusy) {
-        resolve({ success: false, message: "Device busy — an operation is already running.", errorCode: "DEVICE_BUSY" as const });
-        return;
-      }
-      this._flowBusy = true;
+  /** Run an issue/checkout flow. Errors are caught and returned as failure results. */
+  private runFlow<T>(fn: () => Promise<T>): Promise<T | { success: false; message: string; errorCode: "UNKNOWN_ERROR" }> {
+    return new Promise<T | { success: false; message: string; errorCode: "UNKNOWN_ERROR" }>((resolve) => {
       fn().then(
         (result) => { resolve(result); },
         (error) => { resolve({ success: false, message: String(error), errorCode: "UNKNOWN_ERROR" as const }); }
-      ).finally(() => { this._flowBusy = false; });
+      );
     });
   }
 
@@ -751,18 +744,9 @@ export class K750Service {
   }
 
   /**
-   * Public DC eject. Refuses while an issue/return flow owns the device.
-   * Flow code must call `runDCEject` instead — `_flowBusy` is set for the whole
-   * flow, so going through this wrapper would make the flow reject itself.
+   * Public DC eject.
    */
   async ejectDC(): Promise<DCResult> {
-    if (this._flowBusy) {
-      return {
-        success: false, confirmed: false, resultCode: "DEVICE_BUSY",
-        message: "Device busy — an operation is already running.",
-        pollCount: 0, elapsed: 0,
-      };
-    }
     return this.runDCEject();
   }
 
@@ -981,13 +965,6 @@ export class K750Service {
   // ---- FC0: Dispense out of mouth (drop from bayonet) — with completion polling ----
   /** Public FC0 eject. See `ejectDC` for why flows use `runFC0Eject` instead. */
   async ejectFC0(): Promise<DCResult> {
-    if (this._flowBusy) {
-      return {
-        success: false, confirmed: false, resultCode: "DEVICE_BUSY",
-        message: "Device busy — an operation is already running.",
-        pollCount: 0, elapsed: 0,
-      };
-    }
     return this.runFC0Eject();
   }
 

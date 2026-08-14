@@ -142,17 +142,13 @@ export default function IssueCardPage() {
   }, [user]);
 
   // Self-scheduling poll: setInterval fired every second regardless of how long
-  // an AP round-trip took, so slow replies queued up behind each other on the
-  // service lock. This waits for each poll to finish and skips while a flow owns
-  // the device.
+  // Auto-refresh device status every second while connected and idle.
   useEffect(() => {
     if (!(autoRefresh && connState === "connected" && !issuing && !exitRunning)) return;
     let cancelled = false;
     const tick = async () => {
       if (cancelled) return;
-      if (!service.isFlowBusy) {
-        try { await service.queryAP(); } catch { /* */ }
-      }
+      try { await service.queryAP(); } catch { /* */ }
       if (!cancelled) autoRefreshRef.current = setTimeout(tick, 1000);
     };
     autoRefreshRef.current = setTimeout(tick, 1000);
@@ -183,7 +179,6 @@ export default function IssueCardPage() {
   const handleIssue = async () => {
     if (!empId.trim() || !empName.trim() || !empDept.trim() || !profile || issuing) return;
     if (connState !== "connected") { toast("Connect to K750 device first", "error"); return; }
-    if (service.isFlowBusy) { toast("Device busy — another operation is already running.", "warning"); return; }
     setIssuing(true);
     setResult(null);
     setIssueStep(0);
@@ -255,7 +250,6 @@ export default function IssueCardPage() {
   // ===== Card Return: FD0 → visitor inserts card → FC7 → CP → FD1 → FD3 → Firestore =====
   const handleVisitorExit = async () => {
     if (exitRunning || connState !== "connected" || !selectedCard || !profile) return;
-    if (service.isFlowBusy) { toast("Device busy — another operation is already running.", "warning"); return; }
     const card = selectedCard;
     setExitRunning(true);
     setExitResult(null);
