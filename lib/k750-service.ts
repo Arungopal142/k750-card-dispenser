@@ -1423,13 +1423,6 @@ export class K750Service {
       return result;
     }
 
-    // Log the channel state before sending FC0
-    const preStatus = await this.queryAP();
-    if (preStatus) {
-      const ch = decodeB4Channel(preStatus.raw.byte4);
-      this.log("INFO", [], `[ISSUE] FC0 pre-send: B4=0x${preStatus.raw.byte4.toString(16).padStart(2, "0")} channel=[${ch}]`);
-    }
-
     // Send FC0
     this.log("INFO", [], "[ISSUE] Sending FC0...");
     const ok = await this.sendCmdList2(buildFC0Packet(this.addH, this.addL));
