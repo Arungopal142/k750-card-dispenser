@@ -75,6 +75,7 @@ export const ISSUE_STEP_LABELS = [
   "Clear channel",
   "Dispense",
   "Deliver",
+  "Idle",
 ] as const;
 
 /** Short labels for the card-return flow progress bar (one per step). */
@@ -968,7 +969,12 @@ export class K750Service {
     return this.runFC0Eject();
   }
 
-  private async runFC0Eject(): Promise<DCResult> {
+  /**
+   * @param seedSensorsActive when the caller already knows a card is sitting in
+   * the channel (e.g. FC7 just confirmed it at the reader), pass `true` to skip
+   * the pre-flight AP query so the card starts moving on the next command.
+   */
+  private async runFC0Eject(seedSensorsActive?: boolean): Promise<DCResult> {
     const result: DCResult = {
       success: false,
       confirmed: false,
@@ -985,8 +991,13 @@ export class K750Service {
     }
 
     // See ejectDC: seed the sensor history so a fast eject is not misreported.
-    const preStatus = await this.queryAP();
-    let sawSensorsActive = !!(preStatus && preStatus.raw.byte4 & 0x07);
+    let sawSensorsActive: boolean;
+    if (seedSensorsActive === undefined) {
+      const preStatus = await this.queryAP();
+      sawSensorsActive = !!(preStatus && preStatus.raw.byte4 & 0x07);
+    } else {
+      sawSensorsActive = seedSensorsActive;
+    }
     if (sawSensorsActive) this.log("INFO", [], "FC0: card present in channel before eject");
 
     // If channel is already clear, nothing to eject — succeed immediately.
@@ -1422,13 +1433,19 @@ export class K750Service {
       pollCount++;
       result.pollCount = pollCount;
 
+      // A single dropped AP reply is normal while the mechanism is driving the
+      // card. Only give up once the port is actually gone — otherwise a card
+      // that physically came out gets recorded as a failed issue.
       const st = await this.queryAP();
       if (!st) {
-        this.log("INFO", [], `[ISSUE] FC0 poll #${pollCount}: no AP response — failing`);
-        result.resultCode = "COMMUNICATION_TIMEOUT";
-        result.message = "Lost communication during FC0 delivery.";
-        result.elapsed = Date.now() - t0;
-        return result;
+        this.log("INFO", [], `[ISSUE] FC0 poll #${pollCount}: no AP response — retrying`);
+        if (!this.isConnected) {
+          result.resultCode = "COMMUNICATION_TIMEOUT";
+          result.message = "Lost communication during FC0 delivery.";
+          result.elapsed = Date.now() - t0;
+          return result;
+        }
+        continue;
       }
 
       const { raw, flags } = st;
@@ -1538,12 +1555,9 @@ export class K750Service {
 
       const chPre = decodeB4Channel(pre.raw.byte4);
       this.log("INFO", [], `[AP] Channel=${chPre}`);
-      if (pre.raw.byte4 & 0x07) {
-        this.log("INFO", [], "[ISSUE] PRECHECK FAILED — card already in channel");
-        return { success: false, message: "Card in channel — eject first.", errorCode: "CARD_IN_CHANNEL", status: pre };
-      }
-      this.log("INFO", [], "[AP] Channel=EMPTY");
 
+      // Faults are checked before the auto-clear: driving a jammed or
+      // overlapped card is how you turn a fault into a mechanical failure.
       const preFault = this.criticalFault(pre);
       if (preFault) {
         this.log("INFO", [], `[ISSUE] PRECHECK FAILED — ${preFault.message}`);
@@ -1551,12 +1565,40 @@ export class K750Service {
       }
       this.log("INFO", [], "[AP] Machine=READY");
 
+      // ---- AUTO_CLEAR ----
+      // A leftover card in the channel must not block the issue. Push it out of
+      // the bayonet first so the new card has a clear path.
+      if (pre.raw.byte4 & 0x07) {
+        this.log("INFO", [], "[ISSUE] AUTO_CLEAR — card already in channel, ejecting it with FC0");
+        step(2, "Clearing existing card...");
+        const clear = await this.pollFC0ForIssue();
+        if (!clear.success) {
+          this.log("INFO", [], `[ISSUE] AUTO_CLEAR FAILED — ${clear.message}`);
+          return {
+            success: false,
+            message: `Could not clear the card already in the channel: ${clear.message}`,
+            errorCode: this.dcErrorCode(clear),
+            status: clear.finalStatus,
+          };
+        }
+        await this.delay(CMD_DELAY);
+        const after = await this.queryAP();
+        if (after && (after.raw.byte4 & 0x07)) {
+          this.log("INFO", [], "[ISSUE] AUTO_CLEAR FAILED — channel still occupied");
+          return { success: false, message: "A card is still in the channel — remove it and try again.", errorCode: "CARD_IN_CHANNEL", status: after };
+        }
+        this.log("INFO", [], "[ISSUE] AUTO_CLEAR OK — channel empty");
+      } else {
+        this.log("INFO", [], "[AP] Channel=EMPTY");
+        onStep?.(2, ISSUE_STEPS, "Channel clear.");
+      }
+
       if (pre.flags.recycleBoxFull) this.log("INFO", [], "[AP] Note: recycle box is full (does not block issuing).");
       this.log("INFO", [], "[ISSUE] PRECHECK_OK");
 
       // ---- SEND_FC7 ----
       this.log("INFO", [], "[ISSUE] Sending FC7...");
-      step(2, "Dispensing card...");
+      step(3, "Dispensing card...");
       if (!(await this.sendCmdList2(buildFC7Packet(this.addH, this.addL)))) {
         this.log("INFO", [], "[ISSUE] FC7: command rejected (NAK)");
         return { success: false, message: "The machine did not accept the dispense command (FC7).", errorCode: "NAK_RECEIVED" };
@@ -1600,7 +1642,7 @@ export class K750Service {
         const fault = this.criticalFault(st);
         if (fault) {
           this.log("INFO", [], `[ISSUE] FC7 ABORT — ${fault.message}`);
-          return { ok: false, message: fault.message, errorCode: fault.errorCode, status: st } as StepResult as unknown as IssueResult;
+          return { success: false, message: fault.message, errorCode: fault.errorCode, status: st };
         }
         if (st.flags.boxEmpty && !(st.raw.byte4 & 0x07) && !st.flags.cardIssuing) {
           this.log("INFO", [], "[ISSUE] FC7 ABORT — hopper empty and nothing moving");
@@ -1612,27 +1654,46 @@ export class K750Service {
       }
 
       // Check if FC7 timed out (loop completed without break)
+      let readerUnconfirmed = false;
       if (Date.now() - t0 >= FC7_TIMEOUT) {
         this.log("INFO", [], `[ISSUE] FC7 TIMEOUT after ${n} polls (${FC7_TIMEOUT / 1000}s)`);
-        return {
-          success: false,
-          message: `The card did not reach the reader position within ${FC7_TIMEOUT / 1000}s.`,
-          errorCode: "FC7_TIMEOUT",
-          status: last ?? undefined,
-        };
+        // A card that was picked from the stacker must never be abandoned in the
+        // channel — it would block the machine and the user would get nothing.
+        // Which sensor the card rests on varies between units (READER_SENSOR_MASK
+        // is a guess), so if a card is in the channel and nothing is faulted,
+        // drive it out of the bayonet anyway instead of giving up.
+        const stuck = last ?? (await this.queryAP());
+        const cardInChannel = !!(stuck && stuck.raw.byte4 & 0x07) && !this.criticalFault(stuck!);
+        if (!cardInChannel) {
+          return {
+            success: false,
+            message: `The card did not reach the reader position within ${FC7_TIMEOUT / 1000}s.`,
+            errorCode: "FC7_TIMEOUT",
+            status: last ?? undefined,
+          };
+        }
+        readerUnconfirmed = true;
+        this.log("INFO", [], `[ISSUE] Sensor 3 unconfirmed but channel=${decodeB4Channel(stuck!.raw.byte4)} — delivering the card anyway`);
+      } else {
+        // ---- SENSOR_3_REACHED ----
+        this.log("INFO", [], "[ISSUE] SENSOR_3_REACHED");
       }
-
-      // ---- SENSOR_3_REACHED ----
-      this.log("INFO", [], "[ISSUE] SENSOR_3_REACHED");
 
       // Small delay for the device to settle after reaching S3
       await this.delay(CMD_DELAY);
 
       // ---- SEND_FC0 ----
       this.log("INFO", [], "[ISSUE] Sending FC0...");
-      step(3, "Delivering card...");
+      step(4, "Delivering card...");
 
-      const drop = await this.pollFC0ForIssue();
+      let drop = await this.pollFC0ForIssue();
+      if (!drop.success && drop.resultCode === "MOVEMENT_TIMEOUT" && this.isConnected) {
+        // The card moved but has not cleared the outlet. Drive it again rather
+        // than leaving it half out of the mouth where the user cannot take it.
+        this.log("INFO", [], "[ISSUE] FC0: card still in channel — retrying FC0 once");
+        onStep?.(4, ISSUE_STEPS, "Delivering card (retry)...");
+        drop = await this.pollFC0ForIssue();
+      }
       if (!drop.success) {
         if (!this.isConnected) {
           return { success: false, message: "Device disconnected while delivering the card.", errorCode: "USB_DISCONNECTED" };
@@ -1640,12 +1701,43 @@ export class K750Service {
         return { success: false, message: drop.message, errorCode: this.dcErrorCode(drop), status: drop.finalStatus };
       }
 
+      // The card is physically out of the bayonet from here on. Nothing below
+      // may turn this into a failure — the user is holding the card.
+      onStep?.(4, ISSUE_STEPS, "Card ready for collection.");
+      this.log("INFO", [], "[ISSUE] Card ejected through bayonet — ready for collection");
+
+      // ---- RETURN_TO_IDLE ----
+      // FD3 resets *and returns any card still in the channel to the issuing
+      // box*, so it is only safe once the channel is confirmed empty — otherwise
+      // it would suck the just-delivered card straight back inside.
+      step(5, "Returning machine to idle...");
+      const warnings: string[] = [];
+      const beforeReset = drop.finalStatus ?? (await this.queryAP());
+      if (beforeReset && (beforeReset.raw.byte4 & 0x07) === 0) {
+        if (!(await this.resetFD3())) {
+          warnings.push("the machine did not confirm the reset to idle (FD3)");
+          this.log("INFO", [], "[ISSUE] FD3 not acknowledged — machine may not be in the idle state");
+        } else {
+          this.log("INFO", [], "[ISSUE] FD3 sent — machine back to idle");
+        }
+      } else {
+        // Never send FD3 here: it would retract the card the user is collecting.
+        this.log("INFO", [], "[ISSUE] FD3 SKIPPED — channel not confirmed empty; FD3 would pull the card back into the issuing box");
+        warnings.push("the machine could not be confirmed empty, so it was left as-is rather than risk pulling the card back in");
+      }
+
+      if (readerUnconfirmed) {
+        warnings.push("the card never registered at the reader sensor (check READER_SENSOR_MASK against the AP log for this unit)");
+      }
+
       // ---- ISSUE_SUCCESS ----
-      // FC0 already confirmed channel is clear — no extra commands needed.
       this.log("INFO", [], "[ISSUE] SUCCESS");
       this.log("INFO", [], "[ISSUE] Card successfully issued");
-      onStep?.(ISSUE_STEPS, ISSUE_STEPS, "Card ready for collection.");
-      return { success: true, message: successMessage };
+      const warning = warnings.length
+        ? `The card was delivered, but ${warnings.join("; and ")}.`
+        : undefined;
+      onStep?.(ISSUE_STEPS, ISSUE_STEPS, warning ?? "Machine ready.");
+      return { success: true, message: successMessage, status: drop.finalStatus, warning };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.log("INFO", [], `[ISSUE] FAILED: ${msg}`);
