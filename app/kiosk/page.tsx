@@ -7,6 +7,7 @@ import { logCardIssue } from "../../lib/firestore-service";
 import { useToast } from "../../lib/toast-context";
 import { useAuth } from "../../lib/auth-context";
 import { Loader2, CreditCard, CheckCircle, XCircle, Wifi, WifiOff, RotateCcw, AlertTriangle } from "lucide-react";
+import CommLog from "../../components/CommLog";
 
 export default function KioskPage() {
   const { toast } = useToast();
@@ -348,6 +349,7 @@ export default function KioskPage() {
           100% { transform: scale(1); opacity: 1; }
         }
       `}</style>
+      <CommLog />
     </div>
   );
 }

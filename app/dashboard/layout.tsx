@@ -1,6 +1,7 @@
 "use client";
 
 import Sidebar from "../../components/Sidebar";
+import CommLog from "../../components/CommLog";
 import { SidebarProvider, useSidebar } from "../../lib/sidebar-context";
 
 function UserShell({ children }: { children: React.ReactNode }) {
@@ -15,6 +16,7 @@ function UserShell({ children }: { children: React.ReactNode }) {
       >
         {children}
       </main>
+      <CommLog />
     </div>
   );
 }
