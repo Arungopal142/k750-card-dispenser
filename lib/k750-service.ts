@@ -1443,18 +1443,13 @@ export class K750Service {
       pollCount++;
       result.pollCount = pollCount;
 
-      let st: DeviceStatus | null = null;
-      for (let retry = 0; retry < 2; retry++) {
-        st = await this.queryAP();
-        if (st) break;
-        this.log("INFO", [], `[ISSUE] FC0 poll #${pollCount}: attempt ${retry + 1}/2 — no AP response`);
-        if (Date.now() - t0 >= EJECT_TIMEOUT) break;
-        if (retry < 1) await this.delay(200);
-      }
-
+      const st = await this.queryAP();
       if (!st) {
-        this.log("INFO", [], `[ISSUE] FC0 poll #${pollCount}: communication failed`);
-        continue;
+        this.log("INFO", [], `[ISSUE] FC0 poll #${pollCount}: no AP response — failing`);
+        result.resultCode = "COMMUNICATION_TIMEOUT";
+        result.message = "Lost communication during FC0 delivery.";
+        result.elapsed = Date.now() - t0;
+        return result;
       }
 
       const { raw, flags } = st;
