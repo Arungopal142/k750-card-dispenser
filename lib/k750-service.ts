@@ -1439,7 +1439,7 @@ export class K750Service {
       this.log("INFO", [], "[ISSUE] FC0: command rejected or no ACK");
       return result;
     }
-    this.log("INFO", [], "[ISSUE] FC0: ACK received — waiting for card removal...");
+    this.log("INFO", [], "[ISSUE] FC0: ACK received — card being driven out through bayonet...");
 
     await this.delay(100);
 
@@ -1503,10 +1503,10 @@ export class K750Service {
         result.success = true;
         result.confirmed = true;
         result.resultCode = "SUCCESS";
-        result.message = "Card dropped from bayonet — channel clear.";
+        result.message = "Card ejected through bayonet — channel clear.";
         result.finalStatus = st;
         result.elapsed = Date.now() - t0;
-        this.log("INFO", [], `[ISSUE] FC0: channel EMPTY after ${pollCount} polls (${result.elapsed}ms) — SUCCESS`);
+        this.log("INFO", [], `[ISSUE] FC0: channel EMPTY after ${pollCount} polls (${result.elapsed}ms) — card ejected through bayonet`);
         return result;
       }
 
