@@ -1671,12 +1671,11 @@ export class K750Service {
       }
 
       // ---- ISSUE_SUCCESS ----
-      await this.delay(CMD_DELAY);
-      const finalStatus = await this.queryAP();
+      // FC0 already confirmed channel is clear — no extra commands needed.
       this.log("INFO", [], "[ISSUE] SUCCESS");
       this.log("INFO", [], "[ISSUE] Card successfully issued");
       onStep?.(ISSUE_STEPS, ISSUE_STEPS, "Card ready for collection.");
-      return { success: true, message: successMessage, status: finalStatus ?? undefined };
+      return { success: true, message: successMessage };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.log("INFO", [], `[ISSUE] FAILED: ${msg}`);
