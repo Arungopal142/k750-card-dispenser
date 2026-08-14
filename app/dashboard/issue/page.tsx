@@ -3,11 +3,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
-import { useK750 } from "../../../lib/k750-context";
-import { ISSUE_STEP_LABELS, CHECKOUT_STEP_LABELS, type IssueResult } from "../../../lib/k750-service";
+import { useK750, getK750Service } from "../../../lib/k750-context";
+import { ISSUE_STEP_LABELS, CHECKOUT_STEP_LABELS, type IssueResult, type LogEntry } from "../../../lib/k750-service";
 import { logActivity, subscribeIssuedCards, subscribeAllCardIssues, returnCard, logCardIssue, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { useToast } from "../../../lib/toast-context";
-import { Loader2, CreditCard, RotateCcw, AlertTriangle, CheckCircle, XCircle, Wifi, WifiOff, UserPlus, LogOut } from "lucide-react";
+import { Loader2, CreditCard, RotateCcw, AlertTriangle, CheckCircle, XCircle, Wifi, WifiOff, UserPlus, LogOut, Terminal, Clock } from "lucide-react";
 
 type TabKey = "issue" | "exit";
 
@@ -47,7 +47,39 @@ export default function IssueCardPage() {
   // --- Reset ---
   const [resetting, setResetting] = useState(false);
 
+  // --- Logs ---
+  const [commLog, setCommLog] = useState<LogEntry[]>([]);
+  const [issueHistory, setIssueHistory] = useState<CardIssue[]>([]);
+  const [logTab, setLogTab] = useState<"comm" | "history">("history");
+  const commLogEndRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => { if (!loading && !user) router.replace("/login"); }, [user, loading, router]);
+
+  // Subscribe to device comm log
+  useEffect(() => {
+    const svc = getK750Service();
+    if (!svc) return;
+    const handler = (entry: LogEntry) => {
+      setCommLog((prev) => [...prev.slice(-99), entry]);
+    };
+    svc.onLog = handler;
+    return () => { svc.onLog = undefined; };
+  }, []);
+
+  // Subscribe to issue history from Firestore
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeAllCardIssues(
+      (all) => setIssueHistory(all.slice(0, 30)),
+      (err) => console.error("Issue history error:", err)
+    );
+    return unsub;
+  }, [user]);
+
+  // Auto-scroll comm log
+  useEffect(() => {
+    commLogEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [commLog]);
 
   // Live list of cards currently out with a visitor. Subscribed for the whole
   // page (not just the exit tab) so a card issued on the other tab is already
@@ -560,6 +592,87 @@ export default function IssueCardPage() {
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* ===== LOGS SECTION ===== */}
+      <div className="mt-6 space-y-4">
+        <div className="rounded-xl bg-white border border-gray-200 shadow-sm overflow-hidden">
+          <div className="flex border-b border-gray-200">
+            <button onClick={() => setLogTab("history")}
+              className={`flex items-center gap-2 px-5 py-3 text-[13px] font-semibold transition-colors ${logTab === "history" ? "text-blue-600 border-b-2 border-blue-600 bg-blue-50/50" : "text-gray-500 hover:text-gray-700"}`}>
+              <Clock className="w-4 h-4" /> Issue History
+              <span className="text-[10px] font-mono text-gray-400">({issueHistory.length})</span>
+            </button>
+            <button onClick={() => setLogTab("comm")}
+              className={`flex items-center gap-2 px-5 py-3 text-[13px] font-semibold transition-colors ${logTab === "comm" ? "text-blue-600 border-b-2 border-blue-600 bg-blue-50/50" : "text-gray-500 hover:text-gray-700"}`}>
+              <Terminal className="w-4 h-4" /> Communication
+              <span className="text-[10px] font-mono text-gray-400">({commLog.length})</span>
+            </button>
+          </div>
+
+          {logTab === "history" && (
+            <div style={{ maxHeight: 300, overflowY: "auto" }}>
+              {issueHistory.length === 0 ? (
+                <div className="py-10 text-center text-sm text-gray-400">No issue history yet</div>
+              ) : (
+                <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid #e2e8f0", backgroundColor: "#f8fafc" }}>
+                      <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Time</th>
+                      <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Employee</th>
+                      <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Department</th>
+                      <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Issued By</th>
+                      <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {issueHistory.map((card) => (
+                      <tr key={card.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#64748b", fontSize: 11 }}>{formatDateTime(card.issuedAt)}</td>
+                        <td style={{ padding: "8px 12px", fontWeight: 500, color: "#0f172a" }}>{card.employeeName}</td>
+                        <td style={{ padding: "8px 12px", color: "#475569" }}>{card.department}</td>
+                        <td style={{ padding: "8px 12px", color: "#64748b" }}>{card.issuedBy}</td>
+                        <td style={{ padding: "8px 12px" }}>
+                          <span style={{
+                            display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+                            backgroundColor: card.status === "Issued" ? "#dcfce7" : card.status === "Collected" ? "#dbeafe" : card.status === "Processing" ? "#fef3c7" : "#fee2e2",
+                            color: card.status === "Issued" ? "#166534" : card.status === "Collected" ? "#1e40af" : card.status === "Processing" ? "#92400e" : "#991b1b",
+                          }}>
+                            {card.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {logTab === "comm" && (
+            <div style={{ maxHeight: 300, overflowY: "auto", backgroundColor: "#1e293b", padding: "8px 12px", fontFamily: "monospace", fontSize: 11, lineHeight: "18px" }}>
+              {commLog.length === 0 ? (
+                <div className="py-10 text-center text-sm italic" style={{ color: "#64748b" }}>No communication yet. Connect device and send commands.</div>
+              ) : (
+                commLog.map((entry, i) => {
+                  const time = new Date(entry.timestamp).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                  const color = entry.direction === "TX" ? "#60a5fa" : entry.direction === "RX" ? "#4ade80" : "#fbbf24";
+                  return (
+                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                      <span style={{ color: "#64748b", flexShrink: 0 }}>{time}</span>
+                      <span style={{ color, fontWeight: 600, flexShrink: 0, width: 20 }}>{entry.direction}</span>
+                      <span style={{ color: "#e2e8f0", wordBreak: "break-all" }}>
+                        {entry.hex}
+                        {entry.text && <span style={{ color: "#94a3b8" }}> — {entry.text}</span>}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={commLogEndRef} />
+            </div>
+          )}
         </div>
       </div>
     </div>
