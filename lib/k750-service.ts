@@ -669,7 +669,13 @@ export class K750Service {
         this.log("INFO", [], `FC7 #${n}: B4=0x${raw.byte4.toString(16).padStart(2, "0")} channel=[${channelLabel}] S3=${flags.cardAtSensor3}`);
 
         if (flags.cardAtSensor3) {
-          this.log("INFO", [], "FC7: card at reader, waiting for motor to settle...");
+          this.log("INFO", [], "FC7: card at reader (S3), waiting for motor to settle...");
+          await this.delay(500);
+          return { ok: true };
+        }
+        if ((raw.byte4 & 0x07) !== 0) {
+          const pos = flags.cardAtSensor2 ? "S2" : "S1";
+          this.log("INFO", [], `FC7: card in channel at ${pos} (not S3), waiting for motor to settle...`);
           await this.delay(500);
           return { ok: true };
         }
