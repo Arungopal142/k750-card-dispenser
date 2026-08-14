@@ -1372,8 +1372,8 @@ export class K750Service {
           fd0Enabled = false;
           this.log("INFO", [], "=== VISITOR CHECKOUT SUCCESS ===");
 
-          this.log("INFO", [], "Step 5: FD2 — reset to idle...");
-          await this.resetFD2();
+          this.log("INFO", [], "Step 5: FD3 — reset to idle (return channel card to box)...");
+          await this.resetFD3();
 
           return { success: true, message: `Card returned to the ${boxName}.`, status: st };
         }
@@ -1403,6 +1403,12 @@ export class K750Service {
       this.log("INFO", [], "=== Issue flow ===");
 
       this.log("INFO", [], "Step 1: Pre-check AP...");
+      const preStatus = await this.queryAP();
+      if (preStatus && (preStatus.raw.byte4 & 0x07)) {
+        this.log("INFO", [], "Card in channel — auto-clearing with FC0...");
+        await this.ejectFC0();
+        await this.delay(500);
+      }
       const block = await this.preIssueCheck();
       if (block) {
         const errorCode: ErrorCode = block.includes("empty") ? "BOX_EMPTY"
@@ -1468,8 +1474,8 @@ export class K750Service {
       this.log("INFO", [], "=== SUCCESS ===");
       const status = await this.queryAP();
 
-      this.log("INFO", [], "Step 5: FD2 — reset to idle...");
-      await this.resetFD2();
+      this.log("INFO", [], "Step 5: FD3 — reset to idle (return channel card to box)...");
+      await this.resetFD3();
 
       return { success: true, message: `Card issued for ${name} (${employeeId} — ${department}) — please collect the card.`, status: status ?? undefined };
     } catch (err) {
