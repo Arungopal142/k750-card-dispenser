@@ -790,6 +790,17 @@ export class K750Service {
     let sawSensorsActive = !!(preStatus && preStatus.raw.byte4 & 0x07);
     if (sawSensorsActive) this.log("INFO", [], "DC: card present in channel before eject");
 
+    // If channel is already clear, nothing to eject — succeed immediately.
+    if (!sawSensorsActive) {
+      result.success = true;
+      result.confirmed = true;
+      result.resultCode = "SUCCESS";
+      result.message = "Channel already clear — nothing to eject.";
+      result.elapsed = 0;
+      this.log("INFO", [], "DC: SUCCESS — channel already clear, no eject needed");
+      return result;
+    }
+
     // STATE: SEND_DC
     this.log("INFO", [], "DC: sending command to move card to pickup position...");
     const ok = await this.sendCmdList2(buildDCPacket(this.addH, this.addL));
@@ -819,21 +830,13 @@ export class K750Service {
       pollCount++;
       result.pollCount = pollCount;
 
-      // Attempt up to 2 times to get AP response per poll cycle
-      // (first AP after DC often times out — device still processing)
-      // Cap retries so we don't blow past EJECT_TIMEOUT
-      let st: DeviceStatus | null = null;
-      for (let retry = 0; retry < 2; retry++) {
-        st = await this.queryAP();
-        if (st) break;
-        this.log("INFO", [], `DC: poll #${pollCount} attempt ${retry + 1}/2 — no AP response`);
-        if (Date.now() - t0 >= EJECT_TIMEOUT) break;
-        if (retry < 1) await this.delay(200);
-      }
-
+      const st = await this.queryAP();
       if (!st) {
-        this.log("INFO", [], `DC: poll #${pollCount} — communication failed`);
-        continue;
+        this.log("INFO", [], `DC: poll #${pollCount} — no AP response, failing`);
+        result.resultCode = "COMMUNICATION_TIMEOUT";
+        result.message = "Lost communication during DC eject.";
+        result.elapsed = Date.now() - t0;
+        return result;
       }
 
       const { raw, flags } = st;
@@ -1009,6 +1012,17 @@ export class K750Service {
     let sawSensorsActive = !!(preStatus && preStatus.raw.byte4 & 0x07);
     if (sawSensorsActive) this.log("INFO", [], "FC0: card present in channel before eject");
 
+    // If channel is already clear, nothing to eject — succeed immediately.
+    if (!sawSensorsActive) {
+      result.success = true;
+      result.confirmed = true;
+      result.resultCode = "SUCCESS";
+      result.message = "Channel already clear — nothing to eject.";
+      result.elapsed = 0;
+      this.log("INFO", [], "FC0: SUCCESS — channel already clear, no eject needed");
+      return result;
+    }
+
     this.log("INFO", [], "FC0: sending command to eject card out of mouth...");
     const ok = await this.sendCmdList2(buildFC0Packet(this.addH, this.addL));
     if (!ok) {
@@ -1032,18 +1046,13 @@ export class K750Service {
       pollCount++;
       result.pollCount = pollCount;
 
-      let st: DeviceStatus | null = null;
-      for (let retry = 0; retry < 2; retry++) {
-        st = await this.queryAP();
-        if (st) break;
-        this.log("INFO", [], `FC0: poll #${pollCount} attempt ${retry + 1}/2 — no AP response`);
-        if (Date.now() - t0 >= EJECT_TIMEOUT) break;
-        if (retry < 1) await this.delay(200);
-      }
-
+      const st = await this.queryAP();
       if (!st) {
-        this.log("INFO", [], `FC0: poll #${pollCount} — communication failed`);
-        continue;
+        this.log("INFO", [], `FC0: poll #${pollCount} — no AP response, failing`);
+        result.resultCode = "COMMUNICATION_TIMEOUT";
+        result.message = "Lost communication during FC0 eject.";
+        result.elapsed = Date.now() - t0;
+        return result;
       }
 
       const { raw, flags } = st;
