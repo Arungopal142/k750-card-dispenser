@@ -75,7 +75,6 @@ export const ISSUE_STEP_LABELS = [
   "Clear channel",
   "Dispense",
   "Deliver",
-  "Idle",
 ] as const;
 
 /** Short labels for the card-return flow progress bar (one per step). */
@@ -1382,7 +1381,7 @@ export class K750Service {
     return null;
   }
 
-  // ---- Issue flow: pre-check → auto-clear (FC0) → FC7 → FC0 → FD3 ----------
+  // ---- Issue flow: pre-check → FC7 → FC0 ----------------------------------
   //
   // Nothing here writes to the database. The caller persists the transaction
   // only after this resolves with success:true, so a failed dispense can never
@@ -1481,23 +1480,12 @@ export class K750Service {
         }
         return { success: false, message: drop.message, errorCode: this.dcErrorCode(drop), status: drop.finalStatus };
       }
-      onStep?.(4, ISSUE_STEPS, "Card ready for collection.");
-
-      // --- Step 5: FD3 — back to the idle/rest state ------------------------
-      // The card is physically out from here on, so nothing below may turn this
-      // into a failure — a failed reset is reported as a warning instead.
-      step(5, "Returning machine to idle...");
-      const idle = await this.resetFD3();
-      const warning = idle
-        ? undefined
-        : "The card was delivered, but the machine did not confirm the reset to idle (FD3). Press RS if the next operation fails.";
-      if (!idle) this.log("INFO", [], "FD3 not acknowledged — machine may not be in the idle state");
 
       await this.delay(CMD_DELAY);
       const finalStatus = await this.queryAP();
-      onStep?.(ISSUE_STEPS, ISSUE_STEPS, warning ?? "Machine ready.");
+      onStep?.(ISSUE_STEPS, ISSUE_STEPS, "Card ready for collection.");
       this.log("INFO", [], "=== ISSUE SUCCESS — card ready for collection ===");
-      return { success: true, message: successMessage, status: finalStatus ?? undefined, warning };
+      return { success: true, message: successMessage, status: finalStatus ?? undefined };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.log("INFO", [], `Issue flow FAILED: ${msg}`);
@@ -1510,7 +1498,7 @@ export class K750Service {
 
   /**
    * Issue a card to an employee.
-   * Sequence: pre-check → FC0 (auto-clear) → FC7 → FC0 → FD3.
+   * Sequence: pre-check → FC7 → FC0.
    * Concurrent calls are rejected with DEVICE_BUSY.
    */
   async issueCard(employeeId: string, name: string, department: string, onStep?: FlowProgress): Promise<IssueResult> {
