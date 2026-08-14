@@ -1453,6 +1453,25 @@ export class K750Service {
 
       await this.delay(CMD_DELAY);
 
+      // Wait for device to fully settle after FC7 before sending FC0.
+      // Protocol: "Do not implement another command before a command process
+      // does not finished." B2 must be 0x00 (idle) before we proceed.
+      {
+        const t0 = Date.now();
+        while (Date.now() - t0 < 5000) {
+          const st = await this.queryAP();
+          if (st) {
+            this.log("INFO", [], `Settle: B1=0x${st.raw.byte1.toString(16)} B2=0x${st.raw.byte2.toString(16)} B3=0x${st.raw.byte3.toString(16)} B4=0x${st.raw.byte4.toString(16)}`);
+            // B2 == 0x00 means truly idle — no sending, no collecting, no error
+            if (st.raw.byte2 === 0x00) {
+              this.log("INFO", [], "Device idle (B2=0x00) — ready for FC0");
+              break;
+            }
+          }
+          await this.delay(300);
+        }
+      }
+
       // --- Step 4: FC0 — reader → front bayonet -----------------------------
       step(4, "Delivering card...");
       const drop = await this.runFC0Eject();
