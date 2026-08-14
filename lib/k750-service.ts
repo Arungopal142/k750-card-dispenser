@@ -96,7 +96,7 @@ const ENQ_DELAY = 50;
 const CMD_DELAY = 300;
 const POLL_INTERVAL = 300;
 const FC7_TIMEOUT = 12000;
-const EJECT_TIMEOUT = 4000;
+const EJECT_TIMEOUT = 8000;
 const ACK_TIMEOUT = 1000;
 const RESPONSE_TIMEOUT = 2000;
 const READER_SENSOR_MASK = 0x04;
@@ -669,15 +669,12 @@ export class K750Service {
         this.log("INFO", [], `FC7 #${n}: B4=0x${raw.byte4.toString(16).padStart(2, "0")} channel=[${channelLabel}] S3=${flags.cardAtSensor3}`);
 
         if (flags.cardAtSensor3) {
-          this.log("INFO", [], "FC7: card at reader (S3), waiting for motor to settle...");
-          await this.delay(500);
+          this.log("INFO", [], "FC7: card at reader");
           return { ok: true };
         }
         if ((raw.byte4 & 0x07) !== 0) {
-          const pos = flags.cardAtSensor2 ? "S2" : "S1";
-          this.log("INFO", [], `FC7: card in channel at ${pos} (not S3), waiting for motor to settle...`);
-          await this.delay(500);
-          return { ok: true };
+          this.log("INFO", [], "FC7: card in channel (not S3), continuing...");
+          continue;
         }
         if (flags.boxEmpty) {
           this.log("INFO", [], "FC7: BOX EMPTY");
@@ -726,10 +723,7 @@ export class K750Service {
       return result;
     }
 
-    await this.delay(100);
-
-    let sawSensorsActive = false;
-    let sawTransition = false;
+    this.log("INFO", [], "FC0: polling for channel clear...");
     const t0 = Date.now();
     let pollCount = 0;
 
@@ -738,51 +732,18 @@ export class K750Service {
       pollCount++;
       result.pollCount = pollCount;
 
-      let st: DeviceStatus | null = null;
-      for (let retry = 0; retry < 2; retry++) {
-        st = await this.queryAP();
-        if (st) break;
-        if (Date.now() - t0 >= EJECT_TIMEOUT) break;
-        if (retry < 1) await this.delay(200);
-      }
-
+      const st = await this.queryAP();
       if (!st) continue;
 
-      const { flags } = st;
-      const anySensorActive = (st.raw.byte4 & 0x07) !== 0;
+      const channelClear = (st.raw.byte4 & 0x07) === 0;
 
       this.log("INFO", [], [
         `FC0: #${pollCount}`,
         `B4=0x${st.raw.byte4.toString(16).padStart(2, "0")}`,
-        `S3=${flags.cardAtSensor3} S2=${flags.cardAtSensor2} S1=${flags.cardAtSensor1}`,
+        `clear=${channelClear}`,
       ].join(" "));
 
-      if (flags.commandCannotExecute) {
-        result.resultCode = "DEVICE_ERROR";
-        result.message = "Device cannot execute command.";
-        result.finalStatus = st;
-        return result;
-      }
-      if (flags.cardJam) {
-        result.resultCode = "CARD_JAM";
-        result.message = "Card jam detected.";
-        result.finalStatus = st;
-        return result;
-      }
-      if (flags.cardOverlap) {
-        result.resultCode = "CARD_OVERLAP";
-        result.message = "Card overlap detected.";
-        result.finalStatus = st;
-        return result;
-      }
-
-      if (anySensorActive) {
-        sawSensorsActive = true;
-      } else if (sawSensorsActive) {
-        sawTransition = true;
-      }
-
-      if (sawTransition) {
+      if (channelClear) {
         result.success = true;
         result.confirmed = true;
         result.resultCode = "SUCCESS";
@@ -795,11 +756,9 @@ export class K750Service {
     }
 
     result.elapsed = Date.now() - t0;
-    result.resultCode = sawSensorsActive ? "MOVEMENT_TIMEOUT" : "TARGET_NOT_CONFIRMED";
-    result.message = sawSensorsActive
-      ? `Card stuck — sensors active after ${result.elapsed}ms`
-      : `No sensor activity within ${result.elapsed}ms`;
-    this.log("INFO", [], `FC0: ${result.resultCode} (${pollCount} polls, ${result.elapsed}ms)`);
+    result.resultCode = "MOVEMENT_TIMEOUT";
+    result.message = `Card not ejected within ${result.elapsed}ms`;
+    this.log("INFO", [], `FC0: TIMEOUT (${pollCount} polls, ${result.elapsed}ms)`);
     return result;
   }
 
