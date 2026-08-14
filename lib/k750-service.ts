@@ -1217,24 +1217,8 @@ export class K750Service {
         return { success: false, message: errorMsg, errorCode, status: st ?? undefined };
       }
 
-      // Step 3: DC eject to pickup position
-      this.log("INFO", [], "Step 3: DC eject to pickup position...");
-      const dcResult = await this.ejectDC();
-      if (!dcResult.success) {
-        if (!this.isConnected) return { success: false, message: "Device disconnected.", errorCode: "USB_DISCONNECTED" };
-        const errorCode: ErrorCode = dcResult.resultCode === "CARD_JAM" ? "CARD_JAM"
-          : dcResult.resultCode === "CARD_OVERLAP" ? "CARD_OVERLAP"
-          : dcResult.resultCode === "CARD_EMPTY" ? "BOX_EMPTY"
-          : dcResult.resultCode === "DEVICE_ERROR" ? "ISSUE_ERROR"
-          : dcResult.resultCode === "NOT_CONNECTED" ? "NOT_CONNECTED"
-          : dcResult.resultCode === "TARGET_NOT_CONFIRMED" ? "TARGET_NOT_CONFIRMED"
-          : dcResult.resultCode === "MOVEMENT_TIMEOUT" ? "MOVEMENT_TIMEOUT"
-          : "EJECT_TIMEOUT";
-        return { success: false, message: dcResult.message, errorCode };
-      }
-
-      // Step 4: FC0 drop from bayonet
-      this.log("INFO", [], "Step 4: FC0 drop from bayonet...");
+      // Step 3: FC0 drop from bayonet
+      this.log("INFO", [], "Step 3: FC0 drop from bayonet...");
       const fc0Result = await this.ejectFC0();
       if (!fc0Result.success) {
         if (!this.isConnected) return { success: false, message: "Device disconnected.", errorCode: "USB_DISCONNECTED" };
@@ -1437,24 +1421,7 @@ export class K750Service {
         return { success: false, message: errorMsg, errorCode, status: status ?? undefined };
       }
 
-      this.log("INFO", [], "Step 3: DC eject to pickup position...");
-      const dcResult = await this.ejectDC();
-      if (!dcResult.success) {
-        if (!this.isConnected) {
-          return { success: false, message: "Device disconnected during eject.", errorCode: "USB_DISCONNECTED" };
-        }
-        const errorCode: ErrorCode = dcResult.resultCode === "CARD_JAM" ? "CARD_JAM"
-          : dcResult.resultCode === "CARD_OVERLAP" ? "CARD_OVERLAP"
-          : dcResult.resultCode === "CARD_EMPTY" ? "BOX_EMPTY"
-          : dcResult.resultCode === "DEVICE_ERROR" ? "ISSUE_ERROR"
-          : dcResult.resultCode === "NOT_CONNECTED" ? "NOT_CONNECTED"
-          : dcResult.resultCode === "TARGET_NOT_CONFIRMED" ? "TARGET_NOT_CONFIRMED"
-          : dcResult.resultCode === "MOVEMENT_TIMEOUT" ? "MOVEMENT_TIMEOUT"
-          : "EJECT_TIMEOUT";
-        return { success: false, message: dcResult.message, errorCode };
-      }
-
-      this.log("INFO", [], "Step 4: FC0 drop from bayonet...");
+      this.log("INFO", [], "Step 3: FC0 drop from bayonet...");
       const fc0Result = await this.ejectFC0();
       if (!fc0Result.success) {
         if (!this.isConnected) {
@@ -1474,7 +1441,7 @@ export class K750Service {
       this.log("INFO", [], "=== SUCCESS ===");
       const status = await this.queryAP();
 
-      this.log("INFO", [], "Step 5: FD3 — reset to idle (return channel card to box)...");
+      this.log("INFO", [], "Step 4: FD3 — reset to idle (return channel card to box)...");
       await this.resetFD3();
 
       return { success: true, message: `Card issued for ${name} (${employeeId} — ${department}) — please collect the card.`, status: status ?? undefined };
