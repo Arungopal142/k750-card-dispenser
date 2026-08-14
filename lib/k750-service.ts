@@ -1415,7 +1415,12 @@ export class K750Service {
       // --- Step 2: auto-clear a card already in the channel -----------------
       if (pre.raw.byte4 & 0x07) {
         step(2, "Clearing existing card...");
-        const clear = await this.runFC0Eject();
+        // Try DC first (eject to front bezel), then FC0 (drop from bayonet)
+        let clear = await this.ejectDC();
+        if (!clear.success) {
+          this.log("INFO", [], "DC clear failed, trying FC0...");
+          clear = await this.runFC0Eject();
+        }
         if (!clear.success) {
           return {
             success: false,
