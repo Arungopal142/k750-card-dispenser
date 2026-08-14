@@ -1273,11 +1273,10 @@ export default function DevicePage() {
               </h3>
               <div className="flex flex-col gap-2">
                 {[
-                  { label: "DC — Eject to pickup", cmd: "dc", color: "#f97316" },
+                  { label: "FC0 — Eject card", cmd: "fc0", color: "#f97316" },
                   { label: "FC7 — Move to reader", cmd: "fc7", color: "#2563eb" },
                   { label: "FC6 — Move to sensor 2", cmd: "fc6", color: "#2563eb" },
                   { label: "FC4 — Move to hold position", cmd: "fc4", color: "#2563eb" },
-                  { label: "FC0 — Drop from bayonet", cmd: "fc0", color: "#2563eb" },
                   { label: "FC8 — Enter from front", cmd: "fc8", color: "#2563eb" },
                   { label: "CP — Recycle to box", cmd: "cp", color: "#8b5cf6" },
                   { label: "DB — Return to issuing box", cmd: "db", color: "#8b5cf6" },
@@ -1288,7 +1287,6 @@ export default function DevicePage() {
                       setActionLoading(cmd);
                       let ok = false;
                       switch (cmd) {
-                        case "dc": { const r = await service?.ejectDC(); ok = !!r?.success; break; }
                         case "fc7": ok = !!(await service?.dispenseFC7()); break;
                         case "fc6": ok = !!(await service?.moveFC6()); break;
                         case "fc4": ok = !!(await service?.moveFC4()); break;
