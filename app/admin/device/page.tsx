@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
 import { useK750, getK750Service } from "../../../lib/k750-context";
-import type { LogEntry } from "../../../lib/k750-service";
+import { CHECKOUT_STEP_LABELS, type LogEntry } from "../../../lib/k750-service";
 import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Hand, Terminal } from "lucide-react";
 
 type ToastType = "success" | "error" | "info" | "warning";
@@ -155,9 +155,13 @@ export default function DevicePage() {
     setCollectStep(0);
     setCollectStepMsg("");
     try {
-      const res = await service?.visitorCheckout((step, msg) => { setCollectStep(step); setCollectStepMsg(msg); });
-      if (res?.success) showToast("Card returned to recycle box", "success");
-      else showToast(res?.message || "Collect failed", "error");
+      const res = await service?.visitorCheckout((step, _total, msg) => { setCollectStep(step); setCollectStepMsg(msg); });
+      if (res?.success) {
+        showToast(res.message, "success");
+        if (res.warning) showToast(res.warning, "warning");
+      } else {
+        showToast(res?.message || "Collect failed", "error");
+      }
     } catch { showToast("Collect error", "error"); }
     setActionLoading(null);
     setCollectStep(0);
@@ -400,12 +404,12 @@ export default function DevicePage() {
               {actionLoading === "collect" && (
                 <div style={{ marginTop: 8 }}>
                   <div className="flex items-center gap-2" style={{ fontSize: 11, color: "#64748b" }}>
-                    <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{collectStep}/4</span>
+                    <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{collectStep}/{CHECKOUT_STEP_LABELS.length}</span>
                     <span>{collectStepMsg}</span>
                   </div>
                   <div className="flex gap-1" style={{ marginTop: 6 }}>
-                    {[1, 2, 3, 4].map((i) => (
-                      <div key={i} style={{ height: 4, flex: 1, borderRadius: 2, backgroundColor: i <= collectStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
+                    {CHECKOUT_STEP_LABELS.map((label, i) => (
+                      <div key={label} style={{ height: 4, flex: 1, borderRadius: 2, backgroundColor: i + 1 <= collectStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
                     ))}
                   </div>
                 </div>
@@ -849,17 +853,17 @@ export default function DevicePage() {
             }}
           >
             <div className="flex items-center gap-2" style={{ fontSize: 12, color: "#64748b" }}>
-              <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{collectStep}/4</span>
+              <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{collectStep}/{CHECKOUT_STEP_LABELS.length}</span>
               <span>{collectStepMsg}</span>
             </div>
             <div className="flex gap-1.5" style={{ marginTop: 8 }}>
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} style={{ height: 5, flex: 1, borderRadius: 3, backgroundColor: i <= collectStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
+              {CHECKOUT_STEP_LABELS.map((label, i) => (
+                <div key={label} style={{ height: 5, flex: 1, borderRadius: 3, backgroundColor: i + 1 <= collectStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
               ))}
             </div>
             <div className="flex justify-between" style={{ marginTop: 6 }}>
-              {["Enable front", "Insert card", "Move to reader", "Return to box"].map((label, idx) => (
-                <span key={idx} style={{ fontSize: 9, color: idx + 1 <= collectStep ? "#2563eb" : "#94a3b8", fontWeight: idx + 1 === collectStep ? 600 : 400 }}>{label}</span>
+              {CHECKOUT_STEP_LABELS.map((label, idx) => (
+                <span key={label} style={{ fontSize: 9, color: idx + 1 <= collectStep ? "#2563eb" : "#94a3b8", fontWeight: idx + 1 === collectStep ? 600 : 400 }}>{label}</span>
               ))}
             </div>
           </div>

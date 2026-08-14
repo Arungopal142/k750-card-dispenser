@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useK750 } from "../../lib/k750-context";
-import type { IssueResult } from "../../lib/k750-service";
-import { logCardIssue, updateCardIssue } from "../../lib/firestore-service";
+import { ISSUE_STEP_LABELS, type IssueResult } from "../../lib/k750-service";
+import { logCardIssue } from "../../lib/firestore-service";
 import { useToast } from "../../lib/toast-context";
 import { useAuth } from "../../lib/auth-context";
 import { Loader2, CreditCard, CheckCircle, XCircle, Wifi, WifiOff, RotateCcw, AlertTriangle } from "lucide-react";
@@ -33,6 +33,8 @@ export default function KioskPage() {
   const [result, setResult] = useState<IssueResult | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [issued, setIssued] = useState(false);
+  const [issueStep, setIssueStep] = useState(0);
+  const [issueStepMsg, setIssueStepMsg] = useState("");
 
   const [empId, setEmpId] = useState("");
   const [empName, setEmpName] = useState("");
@@ -43,52 +45,79 @@ export default function KioskPage() {
     try { await connect(); } catch { /* */ }
   };
 
+  // Issue: pre-check → FC0 (auto-clear) → FC7 → FC0 → FD3, then Firestore.
+  // The transaction is recorded only after the card has physically come out.
   const handleIssue = async () => {
     if (!empId.trim() || !empName.trim() || !empDept.trim()) return;
     if (issuing || connState !== "connected" || !user) return;
+    if (service.isFlowBusy) { toast("Machine busy — please wait.", "warning"); return; }
     setIssuing(true);
     setResult(null);
     setIssued(false);
+    setIssueStep(0);
+    setIssueStepMsg("");
     const id = empId.trim();
     const nm = empName.trim();
     const dp = empDept.trim();
-    let cardIssueId: string | null = null;
     try {
-      const issueRes = await logCardIssue({
-        employeeId: id, employeeName: nm, department: dp,
-        issuedBy: "Self-Service", issuedById: user.uid, status: "Processing",
-        source: "K750",
+      const res = await service.issueCard(id, nm, dp, (step, _total, msg) => {
+        setIssueStep(step);
+        setIssueStepMsg(msg);
       });
-      cardIssueId = issueRes;
-      const res = await service?.issueCard(id, nm, dp);
-      if (res) {
-        setResult(res);
-        if (cardIssueId) await updateCardIssue(cardIssueId, {
+      setResult(res);
+
+      try {
+        await logCardIssue({
+          employeeId: id, employeeName: nm, department: dp,
+          issuedBy: "Self-Service", issuedById: user.uid,
           status: res.success ? "Issued" : "Failed",
+          source: "K750",
           ...(res.success ? {} : { errorMessage: res.message }),
         });
+      } catch (dbErr) {
+        const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
         if (res.success) {
-          setIssued(true);
-          toast("Card issued! Please collect.", "success");
-          setEmpId(""); setEmpName(""); setEmpDept("");
-          setTimeout(() => { setIssued(false); empIdRef.current?.focus(); }, 5000);
-        } else {
-          toast(res.message, "error");
+          const warning = `Card was dispensed, but the transaction could not be saved: ${msg}`;
+          setResult({ success: false, message: warning });
+          toast(warning, "error");
+          setIssuing(false);
+          setIssueStep(0);
+          setIssueStepMsg("");
+          return;
         }
+      }
+
+      if (res.success) {
+        setIssued(true);
+        toast("Card issued! Please collect.", "success");
+        setEmpId(""); setEmpName(""); setEmpDept("");
+        setTimeout(() => { setIssued(false); empIdRef.current?.focus(); }, 5000);
+      } else {
+        toast(res.message, "error");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setResult({ success: false, message: `Error: ${msg}` });
       toast(`Error: ${msg}`, "error");
-      if (cardIssueId) await updateCardIssue(cardIssueId, { status: "Failed", errorMessage: msg });
+      await logCardIssue({
+        employeeId: id, employeeName: nm, department: dp,
+        issuedBy: "Self-Service", issuedById: user.uid,
+        status: "Failed", source: "K750", errorMessage: msg,
+      }).catch(() => {});
     }
     setIssuing(false);
+    setIssueStep(0);
+    setIssueStepMsg("");
   };
 
   const s = deviceStatus;
   const b4 = s?.raw.byte4 ?? 0;
   const hasCardInChannel = !!(b4 & 0x07);
-  const blocking = hasCardInChannel ? "Card in channel — eject first" : null;
+  // Informational: step 2 of the issue flow clears the channel with FC0, so a
+  // card sitting in the channel no longer blocks the button.
+  const channelNotice = hasCardInChannel ? "A card is in the channel — it will be cleared automatically." : null;
+  const issueDisabled =
+    connState !== "connected" || issuing || !empId.trim() || !empName.trim() || !empDept.trim() || !user || authLoading;
 
   const connColor = connState === "connected" ? "bg-green-500" : connState === "connecting" ? "bg-yellow-500 animate-pulse" : "bg-gray-400";
   const connLabel = connState === "connected" ? "CONNECTED" : connState === "connecting" ? "CONNECTING" : "OFFLINE";
@@ -200,22 +229,22 @@ export default function KioskPage() {
 
               <button
                 onClick={handleIssue}
-                disabled={connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim() || !user || authLoading}
+                disabled={issueDisabled}
                 style={{
                   height: 56, width: "100%", borderRadius: 8,
                   backgroundColor: "#16a34a", color: "#fff",
                   fontWeight: 700, fontSize: 17,
-                  opacity: (connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim() || !user || authLoading) ? 0.4 : 1,
-                  cursor: (connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim() || !user || authLoading) ? "not-allowed" : "pointer",
+                  opacity: issueDisabled ? 0.4 : 1,
+                  cursor: issueDisabled ? "not-allowed" : "pointer",
                 }}
                 className="flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
               >
                 <CreditCard className="w-5 h-5" /> GET MY CARD
               </button>
 
-              {blocking && (
-                <div className="flex items-center justify-center gap-2 rounded-lg p-3 text-sm font-medium" style={{ backgroundColor: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" }}>
-                  <AlertTriangle className="w-4 h-4" /> {blocking}
+              {channelNotice && (
+                <div className="flex items-center justify-center gap-2 rounded-lg p-3 text-sm font-medium" style={{ backgroundColor: "#fffbeb", color: "#b45309", border: "1px solid #fde68a" }}>
+                  <AlertTriangle className="w-4 h-4" /> {channelNotice}
                 </div>
               )}
             </div>
@@ -232,19 +261,27 @@ export default function KioskPage() {
 
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                <span>Checking device...</span>
+                <span>{issueStepMsg || "Checking machine..."}</span>
               </div>
 
-              <div className="w-full max-w-xs mx-auto" style={{ height: 6, borderRadius: 3, backgroundColor: "#e2e8f0", overflow: "hidden" }}>
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    backgroundColor: "#3b82f6",
-                    animation: "pulse 1.8s ease-in-out infinite",
-                    width: "60%",
-                  }}
-                />
+              {/* Real per-step progress, driven by the K750 flow callback. */}
+              <div className="w-full max-w-xs mx-auto flex gap-1.5">
+                {ISSUE_STEP_LABELS.map((label, i) => (
+                  <div
+                    key={label}
+                    style={{
+                      height: 6,
+                      flex: 1,
+                      borderRadius: 3,
+                      backgroundColor: i + 1 <= issueStep ? "#3b82f6" : "#e2e8f0",
+                      transition: "background-color 0.3s",
+                    }}
+                  />
+                ))}
               </div>
+              <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace" }}>
+                Step {Math.max(issueStep, 1)} of {ISSUE_STEP_LABELS.length}
+              </span>
             </div>
           )}
 

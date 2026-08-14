@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
 import { useK750 } from "../../../lib/k750-context";
-import type { IssueResult } from "../../../lib/k750-service";
-import { logActivity, subscribeIssuedCards, subscribeAllCardIssues, returnCard, logCardIssue, updateCardIssue, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
+import { ISSUE_STEP_LABELS, CHECKOUT_STEP_LABELS, type IssueResult } from "../../../lib/k750-service";
+import { logActivity, subscribeIssuedCards, subscribeAllCardIssues, returnCard, logCardIssue, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { useToast } from "../../../lib/toast-context";
 import { Loader2, CreditCard, RotateCcw, AlertTriangle, CheckCircle, XCircle, Wifi, WifiOff, UserPlus, LogOut } from "lucide-react";
 
@@ -24,6 +24,8 @@ export default function IssueCardPage() {
   // --- Issue Card state ---
   const [result, setResult] = useState<IssueResult | null>(null);
   const [issuing, setIssuing] = useState(false);
+  const [issueStep, setIssueStep] = useState(0);
+  const [issueStepMsg, setIssueStepMsg] = useState("");
   const [empId, setEmpId] = useState("");
   const [empName, setEmpName] = useState("");
   const [empDept, setEmpDept] = useState("");
@@ -127,67 +129,94 @@ export default function IssueCardPage() {
     toast(ok ? "Device reset successful" : "Reset failed — no response", ok ? "success" : "error");
   };
 
-  // ===== Issue Card (FC7 → DC) =====
+  // ===== Issue Card: pre-check → FC0 (auto-clear) → FC7 → FC0 → FD3 =====
+  //
+  // Nothing is written to Firestore until the card has physically been
+  // delivered: the transaction is recorded as "Issued" only after the device
+  // flow reports success, and as "Failed" (with the real error) otherwise.
   const handleIssue = async () => {
     if (!empId.trim() || !empName.trim() || !empDept.trim() || !profile || issuing) return;
     if (connState !== "connected") { toast("Connect to K750 device first", "error"); return; }
+    if (service.isFlowBusy) { toast("Device busy — another operation is already running.", "warning"); return; }
     setIssuing(true);
     setResult(null);
+    setIssueStep(0);
+    setIssueStepMsg("");
     const id = empId.trim();
     const name = empName.trim();
     const dept = empDept.trim();
-    // The card record is written *before* the device is touched and updated with
-    // the outcome afterwards, so a crash mid-issue leaves a "Processing" row
-    // rather than nothing at all. Without this the Card Return tab (which reads
-    // status == "Issued") stayed empty forever and admin reports missed every
-    // card issued from this page.
-    let cardIssueId: string | null = null;
-    try {
-      cardIssueId = await logCardIssue({
-        employeeId: id,
-        employeeName: name,
-        department: dept,
-        issuedBy: profile.displayName || profile.email,
-        issuedById: user?.uid ?? "",
-        status: "Processing",
-        source: "K750",
-      });
-    } catch { /* device flow must still run even if logging fails */ }
 
     try {
-      const res = await service?.issueCard(id, name, dept);
-      if (res) {
-        setResult(res);
-        if (cardIssueId) {
-          await updateCardIssue(cardIssueId, {
-            status: res.success ? "Issued" : "Failed",
-            ...(res.success ? {} : { errorMessage: res.message }),
-          }).catch(() => {});
-        }
-        await logActivity({ userId: user?.uid ?? "", userName: profile?.displayName || "Unknown", action: "Card Issued", details: `${name} - ${dept} - ${res.success ? "Success" : "Failed"}` });
-        toast(res.success ? `Card issued!` : res.message, res.success ? "success" : "error");
+      const res = await service.issueCard(id, name, dept, (step, _total, msg) => {
+        setIssueStep(step);
+        setIssueStepMsg(msg);
+      });
+      setResult(res);
+
+      try {
+        await logCardIssue({
+          employeeId: id,
+          employeeName: name,
+          department: dept,
+          issuedBy: profile.displayName || profile.email,
+          issuedById: user?.uid ?? "",
+          status: res.success ? "Issued" : "Failed",
+          source: "K750",
+          ...(res.success ? {} : { errorMessage: res.message }),
+        });
+        await logActivity({
+          userId: user?.uid ?? "",
+          userName: profile?.displayName || "Unknown",
+          action: "Card Issued",
+          details: `${name} - ${dept} - ${res.success ? "Success" : `Failed: ${res.message}`}`,
+        });
+      } catch (dbErr) {
+        const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
         if (res.success) {
-          setTimeout(() => { setEmpId(""); setEmpName(""); setEmpDept(""); setResult(null); }, 3000);
+          // The hardware and the database now disagree — say so instead of
+          // reporting a clean success.
+          const warning = `Card was dispensed, but the transaction could not be saved: ${msg}`;
+          setResult({ success: false, message: warning });
+          toast(warning, "error");
+          setIssuing(false);
+          setIssueStep(0);
+          setIssueStepMsg("");
+          return;
         }
+      }
+
+      if (res.warning) toast(res.warning, "warning");
+      toast(res.success ? "Card issued — please collect the card." : res.message, res.success ? "success" : "error");
+      if (res.success) {
+        setTimeout(() => { setEmpId(""); setEmpName(""); setEmpDept(""); setResult(null); }, 3000);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setResult({ success: false, message: `Error: ${msg}` });
       toast(`Error: ${msg}`, "error");
-      if (cardIssueId) await updateCardIssue(cardIssueId, { status: "Failed", errorMessage: msg }).catch(() => {});
+      await logCardIssue({
+        employeeId: id, employeeName: name, department: dept,
+        issuedBy: profile.displayName || profile.email,
+        issuedById: user?.uid ?? "",
+        status: "Failed", source: "K750", errorMessage: msg,
+      }).catch(() => {});
     }
     setIssuing(false);
+    setIssueStep(0);
+    setIssueStepMsg("");
   };
 
-  // ===== Visitor Exit: FD0 → visitor inserts card → FC7 → DB/CP → Firestore =====
+  // ===== Card Return: FD0 → visitor inserts card → FC7 → CP → FD1 → FD3 → Firestore =====
   const handleVisitorExit = async () => {
     if (exitRunning || connState !== "connected" || !selectedCard || !profile) return;
+    if (service.isFlowBusy) { toast("Device busy — another operation is already running.", "warning"); return; }
     const card = selectedCard;
     setExitRunning(true);
     setExitResult(null);
     setExitStep(0);
+    setExitStepMsg("");
     try {
-      const res = await service?.visitorCheckout((step, msg) => { setExitStep(step); setExitStepMsg(msg); });
+      const res = await service.visitorCheckout((step, _total, msg) => { setExitStep(step); setExitStepMsg(msg); });
       if (res) {
         if (res.success && card.id) {
           // The card is physically back in the machine. If this write fails the
@@ -213,7 +242,8 @@ export default function IssueCardPage() {
           }
         }
         setExitResult(res);
-        toast(res.success ? res.message : res.message, res.success ? "success" : "error");
+        if (res.warning) toast(res.warning, "warning");
+        toast(res.message, res.success ? "success" : "error");
         // On success the live subscription drops the row and clears the selection.
       }
     } catch (err) {
@@ -231,7 +261,13 @@ export default function IssueCardPage() {
   const s = deviceStatus;
   const b4 = s?.raw.byte4 ?? 0;
   const hasCardInChannel = !!(b4 & 0x07);
-  const blocking = b4 & 0x07 ? "Card in channel — eject first" : null;
+  // Informational only on the Issue tab (the flow auto-clears it); the Card
+  // Return tab still needs an empty channel before the visitor inserts a card.
+  const channelNotice = hasCardInChannel
+    ? activeTab === "issue"
+      ? "A card is in the channel — it will be cleared automatically before dispensing."
+      : "Card in channel — clear it before starting a return."
+    : null;
 
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     { key: "issue", label: "Issue Card", icon: <CreditCard className="w-4 h-4" /> },
@@ -312,14 +348,37 @@ export default function IssueCardPage() {
                   </div>
                 </div>
               </div>
-              {result && (
-                <div className={`rounded-xl p-4 text-sm font-medium flex items-center gap-3 animate-fade-in ${result.success ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
-                  {result.success ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : <XCircle className="w-5 h-5 flex-shrink-0" />}
-                  {result.message}
+              {issuing && (
+                <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <span className="font-mono font-bold text-blue-600">{issueStep}/{ISSUE_STEP_LABELS.length}</span>
+                    <span>{issueStepMsg || "Starting..."}</span>
+                  </div>
+                  <div className="flex gap-1.5">
+                    {ISSUE_STEP_LABELS.map((_, i) => (
+                      <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors ${i + 1 <= issueStep ? "bg-blue-500" : "bg-gray-200"}`} />
+                    ))}
+                  </div>
+                  <div className="flex justify-between">
+                    {ISSUE_STEP_LABELS.map((label, i) => (
+                      <span key={label} className={`text-[9px] ${i + 1 <= issueStep ? "text-blue-600" : "text-gray-400"} ${i + 1 === issueStep ? "font-semibold" : ""}`}>{label}</span>
+                    ))}
+                  </div>
                 </div>
               )}
+              {result && (
+                <div className={`rounded-xl p-4 text-sm font-medium flex items-start gap-3 animate-fade-in ${result.success ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
+                  {result.success ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : <XCircle className="w-5 h-5 flex-shrink-0" />}
+                  <span>
+                    {result.message}
+                    {result.warning && <span className="block text-xs font-normal text-amber-700 mt-1">{result.warning}</span>}
+                  </span>
+                </div>
+              )}
+              {/* A card sitting in the channel no longer blocks issuing — step 2
+                  of the flow clears it with FC0 before dispensing. */}
               <button onClick={handleIssue}
-                disabled={connState !== "connected" || issuing || !!blocking || hasCardInChannel || !empId.trim() || !empName.trim() || !empDept.trim()}
+                disabled={connState !== "connected" || issuing || !empId.trim() || !empName.trim() || !empDept.trim()}
                 className="w-full rounded-xl px-6 py-3 text-[14px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2" style={{ height: "48px", backgroundColor: "#16a34a" }}>
                 {issuing ? <><Loader2 className="animate-spin h-4 w-4" /> Issuing...</> : <><CreditCard className="w-5 h-5" /> Issue Card</>}
               </button>
@@ -387,21 +446,29 @@ export default function IssueCardPage() {
                 {exitRunning && (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-xs text-gray-600">
-                      <span className="font-mono font-bold text-blue-600">{exitStep}/4</span>
+                      <span className="font-mono font-bold text-blue-600">{exitStep}/{CHECKOUT_STEP_LABELS.length}</span>
                       <span>{exitStepMsg}</span>
                     </div>
                     <div className="flex gap-1.5">
-                      {[1, 2, 3, 4].map((i) => (
-                        <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors ${i <= exitStep ? "bg-blue-500" : "bg-gray-200"}`} />
+                      {CHECKOUT_STEP_LABELS.map((_, i) => (
+                        <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors ${i + 1 <= exitStep ? "bg-blue-500" : "bg-gray-200"}`} />
+                      ))}
+                    </div>
+                    <div className="flex justify-between">
+                      {CHECKOUT_STEP_LABELS.map((label, i) => (
+                        <span key={label} className={`text-[9px] ${i + 1 <= exitStep ? "text-blue-600" : "text-gray-400"} ${i + 1 === exitStep ? "font-semibold" : ""}`}>{label}</span>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
               {exitResult && (
-                <div className={`rounded-xl p-4 text-sm font-medium flex items-center gap-3 animate-fade-in ${exitResult.success ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
+                <div className={`rounded-xl p-4 text-sm font-medium flex items-start gap-3 animate-fade-in ${exitResult.success ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
                   {exitResult.success ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : <XCircle className="w-5 h-5 flex-shrink-0" />}
-                  {exitResult.message}
+                  <span>
+                    {exitResult.message}
+                    {exitResult.warning && <span className="block text-xs font-normal text-amber-700 mt-1">{exitResult.warning}</span>}
+                  </span>
                 </div>
               )}
               <button onClick={handleVisitorExit}
@@ -415,9 +482,9 @@ export default function IssueCardPage() {
             </>
           )}
 
-          {blocking && (
-            <div className="text-xs text-red-600 flex items-center gap-1.5">
-              <AlertTriangle className="w-4 h-4" /> {blocking}
+          {channelNotice && (
+            <div className={`text-xs flex items-center gap-1.5 ${activeTab === "issue" ? "text-amber-600" : "text-red-600"}`}>
+              <AlertTriangle className="w-4 h-4" /> {channelNotice}
             </div>
           )}
         </div>
