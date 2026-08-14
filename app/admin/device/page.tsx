@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
 import { useK750, getK750Service } from "../../../lib/k750-context";
-import { CHECKOUT_STEP_LABELS, type LogEntry } from "../../../lib/k750-service";
-import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Hand, Terminal } from "lucide-react";
+import { CHECKOUT_STEP_LABELS, ISSUE_STEP_LABELS, type LogEntry, type FlowProgress } from "../../../lib/k750-service";
+import { subscribeAllCardIssues, logCardIssue, updateCardIssue, logActivity, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
+import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Hand, Terminal, CreditCard, CreditCard as CardIcon } from "lucide-react";
 
 type ToastType = "success" | "error" | "info" | "warning";
 
@@ -52,7 +53,7 @@ function SensorDot({ label, active }: { label: string; active: boolean }) {
 }
 
 export default function DevicePage() {
-  const { profile, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const router = useRouter();
   const { service, connState, status, connect, disconnect } = useK750();
   const [firmware, setFirmware] = useState<string | null>(null);
@@ -63,6 +64,18 @@ export default function DevicePage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [commLog, setCommLog] = useState<LogEntry[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  // --- Issue Card state ---
+  const [issueEmpId, setIssueEmpId] = useState("");
+  const [issueEmpName, setIssueEmpName] = useState("");
+  const [issueEmpDept, setIssueEmpDept] = useState("");
+  const [issuing, setIssuing] = useState(false);
+  const [issueStep, setIssueStep] = useState(0);
+  const [issueStepMsg, setIssueStepMsg] = useState("");
+  const [issueResult, setIssueResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // --- Issue Log ---
+  const [issueLog, setIssueLog] = useState<CardIssue[]>([]);
 
   const showToast = (message: string, type: ToastType = "info") => {
     setToast({ message, type });
@@ -88,6 +101,16 @@ export default function DevicePage() {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [commLog]);
+
+  // Live issue log subscription
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeAllCardIssues(
+      (issues) => setIssueLog(issues.slice(0, 20)),
+      (err) => console.error("Issue log error:", err)
+    );
+    return unsub;
+  }, [user]);
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -166,6 +189,63 @@ export default function DevicePage() {
     setActionLoading(null);
     setCollectStep(0);
     setCollectStepMsg("");
+  };
+
+  const handleIssueCard = async () => {
+    if (!issueEmpId.trim() || !issueEmpName.trim() || !issueEmpDept.trim()) {
+      showToast("Fill in all fields", "error");
+      return;
+    }
+    if (connState !== "connected") { showToast("Connect to device first", "error"); return; }
+    if (service?.isFlowBusy) { showToast("Device busy", "warning"); return; }
+    setIssuing(true);
+    setIssueResult(null);
+    setIssueStep(0);
+    setIssueStepMsg("");
+
+    let cardIssueId: string | null = null;
+    try {
+      cardIssueId = await logCardIssue({
+        employeeId: issueEmpId.trim(),
+        employeeName: issueEmpName.trim(),
+        department: issueEmpDept.trim(),
+        issuedBy: profile?.displayName || profile?.email || "Admin",
+        issuedById: user?.uid ?? "",
+        status: "Processing",
+        source: "K750",
+      });
+    } catch { /* */ }
+
+    try {
+      const res = await service?.issueCard(
+        issueEmpId.trim(),
+        issueEmpName.trim(),
+        issueEmpDept.trim(),
+        (step, _total, msg) => { setIssueStep(step); setIssueStepMsg(msg); }
+      );
+      if (res) {
+        setIssueResult({ success: res.success, message: res.message });
+        if (cardIssueId) {
+          await updateCardIssue(cardIssueId, {
+            status: res.success ? "Issued" : "Failed",
+            ...(res.success ? {} : { errorMessage: res.message }),
+          }).catch(() => {});
+        }
+        if (res.success) {
+          await logActivity({ userId: user?.uid ?? "", userName: profile?.displayName || "Admin", action: "Card Issued", details: `${issueEmpName.trim()} - ${issueEmpDept.trim()} - Success` });
+        }
+        showToast(res.success ? "Card issued!" : res.message, res.success ? "success" : "error");
+        if (res.success) {
+          setTimeout(() => { setIssueEmpId(""); setIssueEmpName(""); setIssueEmpDept(""); setIssueResult(null); }, 3000);
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setIssueResult({ success: false, message: `Error: ${msg}` });
+      showToast(`Error: ${msg}`, "error");
+      if (cardIssueId) await updateCardIssue(cardIssueId, { status: "Failed", errorMessage: msg }).catch(() => {});
+    }
+    setIssuing(false);
   };
   if (loading || !profile) {
     return (
@@ -868,6 +948,180 @@ export default function DevicePage() {
             </div>
           </div>
         )}
+
+        {/* ===== ISSUE CARD ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            padding: 20,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <div className="flex items-center gap-2" style={{ marginBottom: 16 }}>
+            <CreditCard className="w-4 h-4" style={{ color: "#2563eb" }} />
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+              Issue Card
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" style={{ marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>Employee ID</label>
+              <input
+                value={issueEmpId}
+                onChange={(e) => setIssueEmpId(e.target.value)}
+                placeholder="e.g. EMP001"
+                disabled={issuing}
+                style={{
+                  width: "100%", padding: "8px 12px", fontSize: 13, borderRadius: 6,
+                  border: "1px solid #cbd5e1", outline: "none", fontFamily: "monospace",
+                }}
+                onFocus={(e) => e.target.style.borderColor = "#2563eb"}
+                onBlur={(e) => e.target.style.borderColor = "#cbd5e1"}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>Name</label>
+              <input
+                value={issueEmpName}
+                onChange={(e) => setIssueEmpName(e.target.value)}
+                placeholder="e.g. John"
+                disabled={issuing}
+                style={{
+                  width: "100%", padding: "8px 12px", fontSize: 13, borderRadius: 6,
+                  border: "1px solid #cbd5e1", outline: "none",
+                }}
+                onFocus={(e) => e.target.style.borderColor = "#2563eb"}
+                onBlur={(e) => e.target.style.borderColor = "#cbd5e1"}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>Department</label>
+              <input
+                value={issueEmpDept}
+                onChange={(e) => setIssueEmpDept(e.target.value)}
+                placeholder="e.g. IT"
+                disabled={issuing}
+                style={{
+                  width: "100%", padding: "8px 12px", fontSize: 13, borderRadius: 6,
+                  border: "1px solid #cbd5e1", outline: "none",
+                }}
+                onFocus={(e) => e.target.style.borderColor = "#2563eb"}
+                onBlur={(e) => e.target.style.borderColor = "#cbd5e1"}
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleIssueCard}
+            disabled={connState !== "connected" || issuing || !issueEmpId.trim() || !issueEmpName.trim() || !issueEmpDept.trim()}
+            style={{
+              backgroundColor: issuing ? "#3b82f6" : "#2563eb",
+              color: "#ffffff",
+              borderRadius: 8,
+              padding: "10px 20px",
+              fontSize: 13,
+              fontWeight: 600,
+              opacity: connState !== "connected" || !issueEmpId.trim() || !issueEmpName.trim() || !issueEmpDept.trim() ? 0.5 : 1,
+            }}
+            className="hover:opacity-90 transition-opacity flex items-center gap-2 disabled:cursor-not-allowed"
+          >
+            {issuing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+            {issuing ? "Issuing..." : "Issue Card"}
+          </button>
+
+          {issuing && (
+            <div style={{ marginTop: 12 }}>
+              <div className="flex items-center gap-2" style={{ fontSize: 11, color: "#64748b" }}>
+                <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{issueStep}/{ISSUE_STEP_LABELS.length}</span>
+                <span>{issueStepMsg}</span>
+              </div>
+              <div className="flex gap-1" style={{ marginTop: 6 }}>
+                {ISSUE_STEP_LABELS.map((label, i) => (
+                  <div key={label} style={{ height: 4, flex: 1, borderRadius: 2, backgroundColor: i + 1 <= issueStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
+                ))}
+              </div>
+              <div className="flex justify-between" style={{ marginTop: 4 }}>
+                {ISSUE_STEP_LABELS.map((label, idx) => (
+                  <span key={label} style={{ fontSize: 9, color: idx + 1 <= issueStep ? "#2563eb" : "#94a3b8", fontWeight: idx + 1 === issueStep ? 600 : 400 }}>{label}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {issueResult && (
+            <div style={{
+              marginTop: 12, padding: "10px 14px", borderRadius: 8, fontSize: 13, fontWeight: 500,
+              backgroundColor: issueResult.success ? "#f0fdf4" : "#fef2f2",
+              border: `1px solid ${issueResult.success ? "#bbf7d0" : "#fecaca"}`,
+              color: issueResult.success ? "#166534" : "#991b1b",
+            }}>
+              {issueResult.message}
+            </div>
+          )}
+        </div>
+
+        {/* ===== ISSUE LOG ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <div className="flex items-center justify-between" style={{ padding: "12px 16px", borderBottom: "1px solid #e2e8f0" }}>
+            <div className="flex items-center gap-2">
+              <CardIcon className="w-4 h-4" style={{ color: "#64748b" }} />
+              <h2 style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>
+                Issue Log
+              </h2>
+              <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace" }}>
+                ({issueLog.length})
+              </span>
+            </div>
+          </div>
+          <div style={{ maxHeight: 300, overflowY: "auto" }}>
+            {issueLog.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", fontSize: 13, color: "#94a3b8" }}>
+                No card issues yet
+              </div>
+            ) : (
+              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #e2e8f0", backgroundColor: "#f8fafc" }}>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Time</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Employee</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Department</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Issued By</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {issueLog.map((card) => (
+                    <tr key={card.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#64748b", fontSize: 11 }}>{formatDateTime(card.issuedAt)}</td>
+                      <td style={{ padding: "8px 12px", fontWeight: 500, color: "#0f172a" }}>{card.employeeName}</td>
+                      <td style={{ padding: "8px 12px", color: "#475569" }}>{card.department}</td>
+                      <td style={{ padding: "8px 12px", color: "#64748b" }}>{card.issuedBy}</td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <span style={{
+                          display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+                          backgroundColor: card.status === "Issued" ? "#dcfce7" : card.status === "Collected" ? "#dbeafe" : card.status === "Processing" ? "#fef3c7" : "#fee2e2",
+                          color: card.status === "Issued" ? "#166534" : card.status === "Collected" ? "#1e40af" : card.status === "Processing" ? "#92400e" : "#991b1b",
+                        }}>
+                          {card.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
 
         {/* ===== MACHINE COMMANDS (TESTING) ===== */}
         <div
