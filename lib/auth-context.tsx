@@ -10,7 +10,7 @@ import {
   type User as FirebaseUser,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "./firebase";
+import { auth, db, isFirebaseConfigured } from "./firebase";
 
 interface UserProfile {
   uid: string;
@@ -50,6 +50,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isFirebaseConfigured) {
+      setAuthError("Firebase not configured. Add NEXT_PUBLIC_FIREBASE_* env vars in Vercel → Settings → Environment Variables and redeploy.");
+      setLoading(false);
+      return;
+    }
     const unsub = onAuthStateChanged(auth(), async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
@@ -91,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     setAuthError(null);
+    if (!isFirebaseConfigured) { const e = new Error("Firebase not configured."); setAuthError(e.message); throw e; }
     try {
       const cred = await signInWithEmailAndPassword(auth(), email, password);
       const snap = await getDoc(doc(db(), "users", cred.user.uid));
@@ -110,6 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = useCallback(async (email: string, password: string, _displayName: string) => {
     setAuthError(null);
+    if (!isFirebaseConfigured) { const e = new Error("Firebase not configured."); setAuthError(e.message); throw e; }
     try {
       await createUserWithEmailAndPassword(auth(), email, password);
       // Profile is created automatically by onAuthStateChanged fallback
@@ -122,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginAnonymously = useCallback(async () => {
     setAuthError(null);
+    if (!isFirebaseConfigured) { const e = new Error("Firebase not configured."); setAuthError(e.message); throw e; }
     try {
       const cred = await signInAnonymously(auth());
       const fallback: UserProfile = {
@@ -146,6 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    if (!isFirebaseConfigured) return;
     await signOut(auth());
     setProfile(null);
     setAuthError(null);
