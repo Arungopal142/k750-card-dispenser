@@ -1451,6 +1451,8 @@ export class K750Service {
         return { success: false, message: move.message, errorCode: move.errorCode ?? "DISPENSE_FAILED", status: move.status };
       }
 
+      await this.delay(CMD_DELAY);
+
       // --- Step 4: FC0 — reader → front bayonet -----------------------------
       step(4, "Delivering card...");
       const drop = await this.runFC0Eject();
