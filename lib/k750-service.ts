@@ -119,6 +119,18 @@ const RESPONSE_TIMEOUT = 2000;
  */
 const READER_SENSOR_MASK = 0x04;
 
+/**
+ * Decode B4 channel sensor bits into a human-readable label.
+ * 0x00 = EMPTY, 0x01 = S1, 0x02 = S2, 0x03 = S1+S2, 0x04 = S3, etc.
+ */
+function decodeB4Channel(b4: number): string {
+  const sensors: string[] = [];
+  if (b4 & 0x01) sensors.push("S1");
+  if (b4 & 0x02) sensors.push("S2");
+  if (b4 & 0x04) sensors.push("S3");
+  return sensors.length > 0 ? sensors.join("+") : "EMPTY";
+}
+
 // ---- Ring Buffer ----
 class RingBuffer {
   private buf: number[] = [];
@@ -1266,7 +1278,9 @@ export class K750Service {
       const st = await this.queryAP();
       if (!st) { this.log("INFO", [], `${tag}: poll #${n} — no AP response`); continue; }
       last = st;
-      this.log("INFO", [], `${tag}: poll #${n} b4=0x${st.raw.byte4.toString(16).padStart(2, "0")} reader=${!!(st.raw.byte4 & READER_SENSOR_MASK)}`);
+      const channelLabel = decodeB4Channel(st.raw.byte4);
+      const atS3 = !!(st.raw.byte4 & READER_SENSOR_MASK);
+      this.log("INFO", [], `${tag}: poll #${n} B4=0x${st.raw.byte4.toString(16).padStart(2, "0")} channel=[${channelLabel}] atS3=${atS3}`);
 
       if (await this.confirmAtReader(st)) {
         this.log("INFO", [], `${tag}: card confirmed at reader position (sensor 3)`);
@@ -1381,7 +1395,135 @@ export class K750Service {
     return null;
   }
 
-  // ---- Issue flow: pre-check → FC7 → FC0 ----------------------------------
+  /**
+   * Send FC0 and poll AP until the channel is clear (B4 & 0x07 === 0).
+   * Used by the issue flow after the card has reached Sensor 3.
+   * Unlike runFC0Eject, this does NOT require a sensor transition — it simply
+   * waits for the channel to become empty, which is the correct success
+   * condition when the card is being dropped from the bayonet after FC7.
+   */
+  private async pollFC0ForIssue(): Promise<DCResult> {
+    const result: DCResult = {
+      success: false, confirmed: false, resultCode: "MOVEMENT_TIMEOUT",
+      message: "", pollCount: 0, elapsed: 0,
+    };
+
+    if (!this.isConnected) {
+      result.resultCode = "NOT_CONNECTED";
+      result.message = "Device not connected.";
+      return result;
+    }
+
+    // Log the channel state before sending FC0
+    const preStatus = await this.queryAP();
+    if (preStatus) {
+      const ch = decodeB4Channel(preStatus.raw.byte4);
+      this.log("INFO", [], `[ISSUE] FC0 pre-send: B4=0x${preStatus.raw.byte4.toString(16).padStart(2, "0")} channel=[${ch}]`);
+    }
+
+    // Send FC0
+    this.log("INFO", [], "[ISSUE] Sending FC0...");
+    const ok = await this.sendCmdList2(buildFC0Packet(this.addH, this.addL));
+    if (!ok) {
+      result.resultCode = "ACK_TIMEOUT";
+      result.message = "FC0 command not acknowledged.";
+      this.log("INFO", [], "[ISSUE] FC0: command rejected or no ACK");
+      return result;
+    }
+    this.log("INFO", [], "[ISSUE] FC0: ACK received — waiting for card removal...");
+
+    await this.delay(100);
+
+    // Poll until channel is clear
+    const t0 = Date.now();
+    let pollCount = 0;
+
+    while (Date.now() - t0 < EJECT_TIMEOUT) {
+      await this.delay(POLL_INTERVAL);
+      pollCount++;
+      result.pollCount = pollCount;
+
+      let st: DeviceStatus | null = null;
+      for (let retry = 0; retry < 2; retry++) {
+        st = await this.queryAP();
+        if (st) break;
+        this.log("INFO", [], `[ISSUE] FC0 poll #${pollCount}: attempt ${retry + 1}/2 — no AP response`);
+        if (Date.now() - t0 >= EJECT_TIMEOUT) break;
+        if (retry < 1) await this.delay(200);
+      }
+
+      if (!st) {
+        this.log("INFO", [], `[ISSUE] FC0 poll #${pollCount}: communication failed`);
+        continue;
+      }
+
+      const { raw, flags } = st;
+      const b4 = raw.byte4;
+      const channelLabel = decodeB4Channel(b4);
+      const channelClear = (b4 & 0x07) === 0;
+
+      this.log("INFO", [], [
+        `[ISSUE] FC0 poll #${pollCount}`,
+        `B1=0x${raw.byte1.toString(16).padStart(2, "0")}`,
+        `B2=0x${raw.byte2.toString(16).padStart(2, "0")}`,
+        `B3=0x${raw.byte3.toString(16).padStart(2, "0")}`,
+        `B4=0x${b4.toString(16).padStart(2, "0")}`,
+        `channel=[${channelLabel}]`,
+      ].join(" "));
+
+      // Error checks
+      if (flags.commandCannotExecute) {
+        result.resultCode = "DEVICE_ERROR";
+        result.message = "Device cannot execute command.";
+        result.finalStatus = st;
+        this.log("INFO", [], "[ISSUE] FC0: CANNOT EXECUTE");
+        return result;
+      }
+      if (flags.cardJam) {
+        result.resultCode = "CARD_JAM";
+        result.message = "Card jam detected — reset (RS) required.";
+        result.finalStatus = st;
+        this.log("INFO", [], "[ISSUE] FC0: CARD JAM");
+        return result;
+      }
+      if (flags.cardOverlap) {
+        result.resultCode = "CARD_OVERLAP";
+        result.message = "Card overlap detected — reset (RS) required.";
+        result.finalStatus = st;
+        this.log("INFO", [], "[ISSUE] FC0: CARD OVERLAP");
+        return result;
+      }
+
+      // Success: channel is clear
+      if (channelClear) {
+        result.success = true;
+        result.confirmed = true;
+        result.resultCode = "SUCCESS";
+        result.message = "Card dropped from bayonet — channel clear.";
+        result.finalStatus = st;
+        result.elapsed = Date.now() - t0;
+        this.log("INFO", [], `[ISSUE] FC0: channel EMPTY after ${pollCount} polls (${result.elapsed}ms) — SUCCESS`);
+        return result;
+      }
+
+      this.log("INFO", [], `[ISSUE] FC0: channel still occupied (${channelLabel}) — waiting...`);
+    }
+
+    // Timeout
+    result.elapsed = Date.now() - t0;
+    result.resultCode = "MOVEMENT_TIMEOUT";
+    result.message = `Card did not clear channel within ${result.elapsed}ms.`;
+    this.log("INFO", [], `[ISSUE] FC0: TIMEOUT after ${pollCount} polls (${result.elapsed}ms)`);
+    return result;
+  }
+
+  // ---- Issue flow: pre-check → FC7 → wait S3 → FC0 → channel clear --------
+  //
+  // State machine:
+  //   ISSUE_START → PRECHECK_AP → PRECHECK_OK → SEND_FC7 → WAIT_SENSOR_3
+  //   → SENSOR_3_REACHED → SEND_FC0 → WAIT_CARD_REMOVED → ISSUE_SUCCESS
+  //
+  // Failure paths at any stage → ISSUE_FAILED
   //
   // Nothing here writes to the database. The caller persists the transaction
   // only after this resolves with success:true, so a failed dispense can never
@@ -1389,91 +1531,134 @@ export class K750Service {
   private async runIssueFlow(successMessage: string, onStep?: FlowProgress): Promise<IssueResult> {
     const step = (n: number, msg: string) => {
       onStep?.(n, ISSUE_STEPS, msg);
-      this.log("INFO", [], `Issue ${n}/${ISSUE_STEPS}: ${msg}`);
+      this.log("INFO", [], `[ISSUE] ${msg}`);
     };
 
     try {
-      this.log("INFO", [], "=== Issue Card flow ===");
+      this.log("INFO", [], "[ISSUE] START");
 
-      // --- Step 1: pre-check ----------------------------------------------
+      // ---- PRECHECK_AP ----
+      this.log("INFO", [], "[ISSUE] AP PRECHECK");
       step(1, "Checking machine...");
       const pre = await this.queryAP();
       if (!pre) {
+        this.log("INFO", [], "[ISSUE] PRECHECK FAILED — no AP response");
         return { success: false, message: "Cannot read the machine status — no response from the K750.", errorCode: "NO_RESPONSE" };
       }
-      const preFault = this.criticalFault(pre);
-      if (preFault) {
-        return { success: false, message: preFault.message, errorCode: preFault.errorCode, status: pre };
-      }
+
+      // Log raw bytes
+      this.log("INFO", [], [
+        `[AP] B1=0x${pre.raw.byte1.toString(16).padStart(2, "0")}`,
+        `B2=0x${pre.raw.byte2.toString(16).padStart(2, "0")}`,
+        `B3=0x${pre.raw.byte3.toString(16).padStart(2, "0")}`,
+        `B4=0x${pre.raw.byte4.toString(16).padStart(2, "0")}`,
+      ].join(" "));
+
+      // Decode and log each byte
       if (pre.flags.boxEmpty) {
+        this.log("INFO", [], "[AP] Hopper=EMPTY");
+        this.log("INFO", [], "[ISSUE] PRECHECK FAILED — card box is empty");
         return { success: false, message: "Card box is empty — refill the card stacker.", errorCode: "BOX_EMPTY", status: pre };
       }
-      // A full recycle box only blocks card *returns*, never issuing.
-      if (pre.flags.recycleBoxFull) this.log("INFO", [], "Note: recycle box is full (does not block issuing).");
+      this.log("INFO", [], "[AP] Hopper=AVAILABLE");
 
-      // --- Step 2: auto-clear a card already in the channel -----------------
+      const chPre = decodeB4Channel(pre.raw.byte4);
+      this.log("INFO", [], `[AP] Channel=${chPre}`);
       if (pre.raw.byte4 & 0x07) {
-        step(2, "Clearing existing card...");
-        // Try DC first (eject to front bezel), then FC0 (drop from bayonet)
-        let clear = await this.ejectDC();
-        if (!clear.success) {
-          this.log("INFO", [], "DC clear failed, trying FC0...");
-          clear = await this.runFC0Eject();
-        }
-        if (!clear.success) {
-          return {
-            success: false,
-            message: `Could not clear the card already in the channel: ${clear.message}`,
-            errorCode: this.dcErrorCode(clear),
-            status: clear.finalStatus,
-          };
-        }
-        await this.delay(CMD_DELAY);
-        const after = await this.queryAP();
-        if (!after) {
-          return { success: false, message: "Cannot read the machine status after clearing the channel.", errorCode: "NO_RESPONSE" };
-        }
-        if (after.raw.byte4 & 0x07) {
-          return { success: false, message: "A card is still in the channel — remove it and try again.", errorCode: "CARD_IN_CHANNEL", status: after };
-        }
-      } else {
-        onStep?.(2, ISSUE_STEPS, "Channel clear.");
+        this.log("INFO", [], "[ISSUE] PRECHECK FAILED — card already in channel");
+        return { success: false, message: "Card in channel — eject first.", errorCode: "CARD_IN_CHANNEL", status: pre };
       }
+      this.log("INFO", [], "[AP] Channel=EMPTY");
 
-      // --- Step 3: FC7 — stacker → reader position (sensor 3) ---------------
-      step(3, "Dispensing card...");
-      const move = await this.moveToReader("FC7");
-      if (!move.ok) {
+      const preFault = this.criticalFault(pre);
+      if (preFault) {
+        this.log("INFO", [], `[ISSUE] PRECHECK FAILED — ${preFault.message}`);
+        return { success: false, message: preFault.message, errorCode: preFault.errorCode, status: pre };
+      }
+      this.log("INFO", [], "[AP] Machine=READY");
+
+      if (pre.flags.recycleBoxFull) this.log("INFO", [], "[AP] Note: recycle box is full (does not block issuing).");
+      this.log("INFO", [], "[ISSUE] PRECHECK_OK");
+
+      // ---- SEND_FC7 ----
+      this.log("INFO", [], "[ISSUE] Sending FC7...");
+      step(2, "Dispensing card...");
+      if (!(await this.sendCmdList2(buildFC7Packet(this.addH, this.addL)))) {
+        this.log("INFO", [], "[ISSUE] FC7: command rejected (NAK)");
+        return { success: false, message: "The machine did not accept the dispense command (FC7).", errorCode: "NAK_RECEIVED" };
+      }
+      this.log("INFO", [], "[ISSUE] FC7: ACK received");
+
+      // ---- WAIT_SENSOR_3 ----
+      this.log("INFO", [], "[ISSUE] Waiting for SENSOR 3...");
+      const t0 = Date.now();
+      let last: DeviceStatus | null = null;
+      let n = 0;
+      while (Date.now() - t0 < FC7_TIMEOUT) {
+        await this.delay(POLL_INTERVAL);
+        n++;
+        const st = await this.queryAP();
+        if (!st) {
+          this.log("INFO", [], `[ISSUE] FC7 poll #${n}: no AP response`);
+          continue;
+        }
+        last = st;
+        const channelLabel = decodeB4Channel(st.raw.byte4);
+        const atS3 = !!(st.raw.byte4 & READER_SENSOR_MASK);
+
+        this.log("INFO", [], [
+          `[ISSUE] FC7 poll #${n}`,
+          `B1=0x${st.raw.byte1.toString(16).padStart(2, "0")}`,
+          `B2=0x${st.raw.byte2.toString(16).padStart(2, "0")}`,
+          `B3=0x${st.raw.byte3.toString(16).padStart(2, "0")}`,
+          `B4=0x${st.raw.byte4.toString(16).padStart(2, "0")}`,
+          `channel=[${channelLabel}]`,
+        ].join(" "));
+
+        if (atS3) {
+          this.log("INFO", [], `[ISSUE] Channel=${channelLabel}`);
+          this.log("INFO", [], "[ISSUE] Card reached SENSOR 3");
+          break;
+        }
+
+        this.log("INFO", [], `[ISSUE] Channel=${channelLabel} — Sensor 3 not reached`);
+
+        const fault = this.criticalFault(st);
+        if (fault) {
+          this.log("INFO", [], `[ISSUE] FC7 ABORT — ${fault.message}`);
+          return { ok: false, message: fault.message, errorCode: fault.errorCode, status: st } as StepResult as unknown as IssueResult;
+        }
+        if (st.flags.boxEmpty && !(st.raw.byte4 & 0x07) && !st.flags.cardIssuing) {
+          this.log("INFO", [], "[ISSUE] FC7 ABORT — hopper empty and nothing moving");
+          return { success: false, message: "Card box is empty — refill the card stacker.", errorCode: "BOX_EMPTY", status: st };
+        }
         if (!this.isConnected) {
           return { success: false, message: "Device disconnected during dispense.", errorCode: "USB_DISCONNECTED" };
         }
-        return { success: false, message: move.message, errorCode: move.errorCode ?? "DISPENSE_FAILED", status: move.status };
       }
 
+      // Check if FC7 timed out (loop completed without break)
+      if (Date.now() - t0 >= FC7_TIMEOUT) {
+        this.log("INFO", [], `[ISSUE] FC7 TIMEOUT after ${n} polls (${FC7_TIMEOUT / 1000}s)`);
+        return {
+          success: false,
+          message: `The card did not reach the reader position within ${FC7_TIMEOUT / 1000}s.`,
+          errorCode: "FC7_TIMEOUT",
+          status: last ?? undefined,
+        };
+      }
+
+      // ---- SENSOR_3_REACHED ----
+      this.log("INFO", [], "[ISSUE] SENSOR_3_REACHED");
+
+      // Small delay for the device to settle after reaching S3
       await this.delay(CMD_DELAY);
 
-      // Wait for device to fully settle after FC7 before sending FC0.
-      // Protocol: "Do not implement another command before a command process
-      // does not finished." B2 must be 0x00 (idle) before we proceed.
-      {
-        const t0 = Date.now();
-        while (Date.now() - t0 < 5000) {
-          const st = await this.queryAP();
-          if (st) {
-            this.log("INFO", [], `Settle: B1=0x${st.raw.byte1.toString(16)} B2=0x${st.raw.byte2.toString(16)} B3=0x${st.raw.byte3.toString(16)} B4=0x${st.raw.byte4.toString(16)}`);
-            // B2 == 0x00 means truly idle — no sending, no collecting, no error
-            if (st.raw.byte2 === 0x00) {
-              this.log("INFO", [], "Device idle (B2=0x00) — ready for FC0");
-              break;
-            }
-          }
-          await this.delay(300);
-        }
-      }
+      // ---- SEND_FC0 ----
+      this.log("INFO", [], "[ISSUE] Sending FC0...");
+      step(3, "Delivering card...");
 
-      // --- Step 4: FC0 — reader → front bayonet -----------------------------
-      step(4, "Delivering card...");
-      const drop = await this.runFC0Eject();
+      const drop = await this.pollFC0ForIssue();
       if (!drop.success) {
         if (!this.isConnected) {
           return { success: false, message: "Device disconnected while delivering the card.", errorCode: "USB_DISCONNECTED" };
@@ -1481,14 +1666,16 @@ export class K750Service {
         return { success: false, message: drop.message, errorCode: this.dcErrorCode(drop), status: drop.finalStatus };
       }
 
+      // ---- ISSUE_SUCCESS ----
       await this.delay(CMD_DELAY);
       const finalStatus = await this.queryAP();
+      this.log("INFO", [], "[ISSUE] SUCCESS");
+      this.log("INFO", [], "[ISSUE] Card successfully issued");
       onStep?.(ISSUE_STEPS, ISSUE_STEPS, "Card ready for collection.");
-      this.log("INFO", [], "=== ISSUE SUCCESS — card ready for collection ===");
       return { success: true, message: successMessage, status: finalStatus ?? undefined };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.log("INFO", [], `Issue flow FAILED: ${msg}`);
+      this.log("INFO", [], `[ISSUE] FAILED: ${msg}`);
       if (msg.includes("disconnect") || msg.includes("device")) {
         return { success: false, message: "Device disconnected. Reconnect and try again.", errorCode: "USB_DISCONNECTED" };
       }
@@ -1498,7 +1685,7 @@ export class K750Service {
 
   /**
    * Issue a card to an employee.
-   * Sequence: pre-check → FC7 → FC0.
+   * Sequence: pre-check → FC7 → wait S3 → FC0 → channel clear.
    * Concurrent calls are rejected with DEVICE_BUSY.
    */
   async issueCard(employeeId: string, name: string, department: string, onStep?: FlowProgress): Promise<IssueResult> {
