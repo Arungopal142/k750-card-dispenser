@@ -1341,8 +1341,8 @@ export default function DevicePage() {
                       let ok = false;
                       switch (cmd) {
                         case "rs": ok = !!(await service?.resetDevice()); break;
-                        case "fd0": showToast("FD0 sent — front auto-sense enabled", "success"); ok = true; break;
-                        case "fd1": showToast("FD1 sent — manual entry mode", "success"); ok = true; break;
+                        case "fd0": ok = !!(await service?.enableFrontAutoSense()); break;
+                        case "fd1": ok = !!(await service?.disableFrontAutoSense()); break;
                         case "fd2": ok = !!(await service?.resetFD2()); break;
                         case "fd3": ok = !!(await service?.resetFD3()); break;
                         case "fd4": ok = !!(await service?.resetFD4()); break;
