@@ -669,8 +669,12 @@ export class K750Service {
         this.log("INFO", [], `FC7 #${n}: B4=0x${raw.byte4.toString(16).padStart(2, "0")} channel=[${channelLabel}] S3=${flags.cardAtSensor3}`);
 
         if (flags.cardAtSensor3) {
-          this.log("INFO", [], "FC7: card at reader");
-          return { ok: true };
+          if (flags.cardIssuing || flags.cardCollecting) {
+            this.log("INFO", [], `FC7: card at reader, motor still running (B2=0x${raw.byte2.toString(16).padStart(2, "0")}), waiting...`);
+          } else {
+            this.log("INFO", [], "FC7: card at reader, motor idle");
+            return { ok: true };
+          }
         }
         if (flags.boxEmpty) {
           this.log("INFO", [], "FC7: BOX EMPTY");
