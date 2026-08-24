@@ -6,6 +6,8 @@ import {
   buildCPPacket, buildFC0Packet, buildFC4Packet, buildFC6Packet, buildFC8Packet,
   buildFD2Packet, buildFD3Packet, buildFD4Packet, buildBEPacket, buildBDPacket,
   buildFC1Packet, buildFRPacket, addressBytes,
+  buildRFPacket, buildFC2Packet, buildBFPacket, buildBGPacket,
+  buildCSPacket, buildLPPacket, buildLFPacket, type BaudRate,
   buildNfcSearchPacket, buildNfcSerialPacket, buildNfcAuthPacket,
   buildNfcReadBlockPacket, buildNfcHaltPacket,
   chipCommandCode, parseCardResponse, NFC_PM, NFC_CHIP_TYPES,
@@ -17,7 +19,7 @@ import {
   type DevicePosition,
 } from "./k750-protocol";
 
-export type { NfcChipType } from "./k750-protocol";
+export type { NfcChipType, BaudRate } from "./k750-protocol";
 
 export interface NfcReadResult {
   success: boolean;
@@ -667,6 +669,78 @@ export class K750Connection {
       this.log("INFO", [], `GV: ${ver}`);
       return ver;
     } catch { return null; }
+  }
+
+  // ─── Remaining Command list 2 entries ────────────────────
+
+  /** RF — short status check (3 status bytes; the channel byte is absent, so
+   *  byte4 comes back as 0). Cheaper than AP when only the machine state
+   *  matters. */
+  async queryRF(): Promise<DeviceStatus | null> {
+    if (!this.isConnected) return null;
+    try {
+      const resp = await this.transact(buildRFPacket(this.addH, this.addL), true);
+      if (!resp) return null;
+      const statusBytes = parseAPStatusFromResponse(resp);
+      if (!statusBytes) return null;
+      const status: DeviceStatus = {
+        raw: statusBytes,
+        flags: getStatusFlags(statusBytes),
+        hex: bytesToHex(resp),
+      };
+      this.onStatusChange?.(status);
+      return status;
+    } catch { return null; }
+  }
+
+  /** FC2 — sensor status. Same decoded-byte shape as FC1. */
+  async querySensors(): Promise<DevicePosition | null> {
+    if (!this.isConnected) return null;
+    const resp = await this.transact(buildFC2Packet(this.addH, this.addL), true);
+    if (!resp) return null;
+    return parseFC1Response(resp);
+  }
+
+  /** BF — accept a card at the front slot (the DLL guide's equivalent of FC8). */
+  async acceptFrontBF(): Promise<boolean> {
+    if (!this.isConnected) return false;
+    this.log("INFO", [], "BF: accept card at front...");
+    return await this.sendCmdList2(buildBFPacket(this.addH, this.addL));
+  }
+
+  /** BG — prohibit front-end card entry (invalidates BF/FC8). */
+  async blockFrontBG(): Promise<boolean> {
+    if (!this.isConnected) return false;
+    this.log("INFO", [], "BG: block front entry...");
+    return await this.sendCmdList2(buildBGPacket(this.addH, this.addL));
+  }
+
+  /**
+   * CS2–CS5 — change the device baud rate.
+   *
+   * The serial port stays open at its current rate, so the link goes silent
+   * the moment the device switches. Disconnect and reconnect (reopening the
+   * port at the new rate) before sending anything else.
+   */
+  async setBaudRate(baud: BaudRate): Promise<boolean> {
+    if (!this.isConnected) return false;
+    this.log("INFO", [], `CS: set baud rate ${baud} — reconnect required afterwards`);
+    return await this.sendCmdList2(buildCSPacket(baud, this.addH, this.addL));
+  }
+
+  /** LP — LED on. rate 0x00 = steady, 0x01-0x0F = n flashes/sec,
+   *  0x82-0x8F = 1 flash every 2-15 sec. */
+  async ledOn(rate = 0x00): Promise<boolean> {
+    if (!this.isConnected) return false;
+    this.log("INFO", [], `LP: LED on (rate 0x${rate.toString(16).padStart(2, "0")})...`);
+    return await this.sendCmdList2(buildLPPacket(rate, this.addH, this.addL));
+  }
+
+  /** LF — LED off. */
+  async ledOff(): Promise<boolean> {
+    if (!this.isConnected) return false;
+    this.log("INFO", [], "LF: LED off...");
+    return await this.sendCmdList2(buildLFPacket(this.addH, this.addL));
   }
 
   // ─── Contactless (NFC) card read ─────────────────────────

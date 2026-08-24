@@ -1278,6 +1278,9 @@ export default function DevicePage() {
                   { label: "FC6 — Move to sensor 2", cmd: "fc6", color: "#2563eb" },
                   { label: "FC4 — Move to hold position", cmd: "fc4", color: "#2563eb" },
                   { label: "FC8 — Enter from front", cmd: "fc8", color: "#2563eb" },
+                  { label: "DC — Move to pickup slot", cmd: "dc", color: "#f97316" },
+                  { label: "BF — Accept card at front", cmd: "bf", color: "#2563eb" },
+                  { label: "BG — Block front entry", cmd: "bg", color: "#dc2626" },
                   { label: "CP — Recycle to box", cmd: "cp", color: "#8b5cf6" },
                   { label: "DB — Return to issuing box", cmd: "db", color: "#8b5cf6" },
                 ].map(({ label, cmd, color }) => (
@@ -1292,6 +1295,9 @@ export default function DevicePage() {
                         case "fc4": ok = !!(await conn.moveFC4()); break;
                         case "fc0": ok = !!(await conn.ejectFC0()); break;
                         case "fc8": ok = !!(await conn.enterFC8()); break;
+                        case "dc": ok = !!(await conn.ejectDC()); break;
+                        case "bf": ok = !!(await conn.acceptFrontBF()); break;
+                        case "bg": ok = !!(await conn.blockFrontBG()); break;
                         case "cp": ok = !!(await conn.recycleCP()); break;
                         case "db": ok = !!(await conn.returnDB()); break;
                       }
@@ -1379,12 +1385,18 @@ export default function DevicePage() {
               </h3>
               <div className="flex flex-col gap-2">
                 {[
-                  { label: "AP — Query status", cmd: "ap", color: "#2563eb" },
+                  { label: "AP — Query status (4 bytes)", cmd: "ap", color: "#2563eb" },
+                  { label: "RF — Query status (3 bytes)", cmd: "rf", color: "#2563eb" },
                   { label: "FC1 — Card position", cmd: "fc1", color: "#2563eb" },
+                  { label: "FC2 — Sensor status", cmd: "fc2", color: "#2563eb" },
                   { label: "FR — Device settings", cmd: "fr", color: "#2563eb" },
                   { label: "GV — Get version", cmd: "gv", color: "#2563eb" },
-                  { label: "BE — Buffer enable", cmd: "be", color: "#059669" },
-                  { label: "BD — Buffer disable", cmd: "bd", color: "#059669" },
+                  { label: "BE — Buzzer on", cmd: "be", color: "#059669" },
+                  { label: "BD — Buzzer off", cmd: "bd", color: "#059669" },
+                  { label: "LP — LED steady on", cmd: "lp0", color: "#059669" },
+                  { label: "LP — LED blink 1/sec", cmd: "lp1", color: "#059669" },
+                  { label: "LP — LED blink 5/sec", cmd: "lp5", color: "#059669" },
+                  { label: "LF — LED off", cmd: "lf", color: "#059669" },
                 ].map(({ label, cmd, color }) => (
                   <button
                     key={cmd}
@@ -1407,8 +1419,19 @@ export default function DevicePage() {
                           break;
                         }
                         case "gv": { const v = await conn.getVersion(); ok = !!v; extra = v || ""; break; }
+                        case "rf": { const st = await conn.queryRF(); ok = !!st; extra = st ? `b1=0x${st.raw.byte1.toString(16).padStart(2,"0")} b2=0x${st.raw.byte2.toString(16).padStart(2,"0")} b3=0x${st.raw.byte3.toString(16).padStart(2,"0")}` : ""; break; }
+                        case "fc2": {
+                          const p2 = await conn.querySensors();
+                          ok = !!p2;
+                          extra = p2 ? `card=${p2.transport} device=${p2.device} box=${p2.cardBox} retain=${p2.retainBox}` : "not supported by this firmware";
+                          break;
+                        }
                         case "be": ok = !!(await conn.bufferEnable()); break;
                         case "bd": ok = !!(await conn.bufferDisable()); break;
+                        case "lp0": ok = !!(await conn.ledOn(0x00)); break;
+                        case "lp1": ok = !!(await conn.ledOn(0x01)); break;
+                        case "lp5": ok = !!(await conn.ledOn(0x05)); break;
+                        case "lf": ok = !!(await conn.ledOff()); break;
                       }
                       setActionLoading(null);
                       showToast(ok ? `${label.split("—")[0].trim()} OK${extra ? ": " + extra : ""}` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
@@ -1505,6 +1528,53 @@ export default function DevicePage() {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Baud rate — changes a persistent device setting */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Baud Rate
+              </h3>
+              <p style={{ fontSize: 11, color: "#b45309", backgroundColor: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "6px 8px", marginBottom: 8 }}>
+                Changes a stored device setting. The serial port stays open at the
+                old rate, so the link goes silent until you disconnect and
+                reconnect. The app opens ports at 9600.
+              </p>
+              <div className="flex flex-col gap-2">
+                {([4800, 9600, 19200, 38400] as const).map((baud) => (
+                  <button
+                    key={baud}
+                    onClick={async () => {
+                      const cmd = `cs${baud}`;
+                      setActionLoading(cmd);
+                      const ok = await conn.setBaudRate(baud);
+                      setActionLoading(null);
+                      showToast(
+                        ok
+                          ? `Baud rate set to ${baud} — disconnect and reconnect to keep talking to the device`
+                          : `Set baud ${baud} failed`,
+                        ok ? "success" : "error"
+                      );
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color: "#b45309",
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: "1px solid #b4530930",
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === `cs${baud}` ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {`CS${{ 4800: 2, 9600: 3, 19200: 4, 38400: 5 }[baud]} — ${baud} baud`}
+                  </button>
+                ))}
               </div>
             </div>
           </div>

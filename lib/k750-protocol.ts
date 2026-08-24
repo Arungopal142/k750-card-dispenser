@@ -217,6 +217,68 @@ export function buildBDPacket(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Ar
   return buildPacket([0x42, 0x44], addH, addL);
 }
 
+// ---------------------------------------------------------------------------
+// Remaining "Command list 2" and LED entries from the protocol doc
+// (reference documents/Communication Protocol of K750.txt, p.4) and the
+// p_Cmd list in the DLL guide (K7X0 DLL Interface Function Operation Guide.txt).
+// ---------------------------------------------------------------------------
+
+/** RF — short status check. Same "SF" reply as AP but with 3 status bytes
+ *  instead of 4 (the channel byte is absent). */
+export function buildRFPacket(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildPacket([0x52, 0x46], addH, addL);
+}
+
+/** FC2 — sensor status (vendor SDK K7X0_CheckSensorStatus; not in the PDF). */
+export function buildFC2Packet(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildPacket([0x46, 0x43, 0x32], addH, addL);
+}
+
+/** BF — accept a card at the front slot. The DLL guide lists it as the
+ *  equivalent of FC8 ("BF" or "FC8"). */
+export function buildBFPacket(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildPacket([0x42, 0x46], addH, addL);
+}
+
+/** BG — prohibit front-end card entry (invalidates BF/FC8). */
+export function buildBGPacket(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildPacket([0x42, 0x47], addH, addL);
+}
+
+export type BaudRate = 4800 | 9600 | 19200 | 38400;
+
+/**
+ * CS2–CS5 — set the device baud rate.
+ *
+ * The doc's table prints CS5 as "0X43 0X53 0X34", the same third byte as CS4;
+ * that is a typo — the commands are CS2/CS3/CS4/CS5, so the digit is '2'..'5'.
+ */
+const BAUD_DIGIT: Record<BaudRate, number> = {
+  4800: 0x32,
+  9600: 0x33,
+  19200: 0x34,
+  38400: 0x35,
+};
+
+export function buildCSPacket(baud: BaudRate, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildPacket([0x43, 0x53, BAUD_DIGIT[baud]], addH, addL);
+}
+
+/**
+ * LP — LED on. The data byte is a flash rate, not ASCII:
+ *   0x00        always on
+ *   0x01–0x0F   1–15 flashes per second
+ *   0x82–0x8F   1 flash every 2–15 seconds
+ */
+export function buildLPPacket(rate = 0x00, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildPacket([0x4c, 0x50, rate & 0xff], addH, addL);
+}
+
+/** LF — LED off. */
+export function buildLFPacket(addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildPacket([0x4c, 0x46], addH, addL);
+}
+
 // --- Response parsing ---
 
 /** Parse one AP status nibble from an ASCII hex character byte (0x30–0x39, 0x41–0x46). */
