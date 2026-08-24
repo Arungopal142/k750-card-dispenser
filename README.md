@@ -37,11 +37,16 @@ If the browser does not support Web Serial API, a warning banner will be display
 3. **Fill form** — Enter Employee ID, Name, Department (max 16 chars each)
 4. **Issue Card** — Button triggers the full flow:
    - FC7: dispense card to reader position
-   - Detect chip type (auto: S50 → UL → TypeA)
-   - Read UID; optionally write data to S50 blocks 4-6
-   - Save card mapping to localStorage
+   - NFC read: detect chip type (auto: S50 → S70 → UL → TypeA) and read the UID
+   - Save the card issue, including the UID, to Firestore
    - FC0: eject card
    - Show SUCCESS banner with UID
+
+   A card with no readable chip still issues successfully — the NFC read is
+   logged and skipped, not treated as a failure.
+
+Admins can also read the UID of a card already at the reader from
+**Admin → Device → Read NFC**.
 5. **RS** — Reset device if errors occur
 
 ## Project Structure

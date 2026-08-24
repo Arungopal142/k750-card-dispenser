@@ -98,12 +98,13 @@ export default function IssueCardPage() {
         await updateCardIssue(cardIssueId, {
           status: res.success ? "Issued" : "Failed",
           ...(res.success ? {} : { errorMessage: res.message }),
+          ...(res.uid ? { cardUid: res.uid, chipType: res.chipType } : {}),
         });
         await logActivity({
           userId: user?.uid ?? "",
           userName: profile?.displayName || "Unknown",
           action: "Issued Card",
-          details: `${nm} (${id}) - ${res.success ? "Success" : "Failed"}${res.errorCode ? ` [${res.errorCode}]` : ""}`,
+          details: `${nm} (${id}) - ${res.success ? "Success" : "Failed"}${res.uid ? ` [UID ${res.uid}]` : ""}${res.errorCode ? ` [${res.errorCode}]` : ""}`,
         });
         toast(
           res.success ? `Card issued for ${nm}` : res.message,
@@ -282,7 +283,15 @@ export default function IssueCardPage() {
               ) : (
                 <XCircle className="w-5 h-5 flex-shrink-0" />
               )}
-              {result.message}
+              <div className="space-y-1">
+                <div>{result.message}</div>
+                {result.uid && (
+                  <div className="text-xs font-normal opacity-80">
+                    {result.chipType} chip — UID{" "}
+                    <span className="font-mono">{result.uid}</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

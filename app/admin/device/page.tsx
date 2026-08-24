@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
 import { useK750 } from "../../../lib/k750-context";
-import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine } from "lucide-react";
+import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Nfc } from "lucide-react";
 
 type ToastType = "success" | "error" | "info";
 
@@ -55,6 +55,7 @@ export default function DevicePage() {
   const router = useRouter();
   const { service, connState, status, connect, disconnect } = useK750();
   const [firmware, setFirmware] = useState<string | null>(null);
+  const [nfcRead, setNfcRead] = useState<{ uid: string; chipType: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
@@ -100,6 +101,18 @@ export default function DevicePage() {
     await service?.queryAP();
     setActionLoading(null);
     showToast(ok ? "Device reset successful" : "Reset failed", ok ? "success" : "error");
+  };
+  const handleReadNfc = async () => {
+    setActionLoading("nfc");
+    const res = await service?.readNfcCard();
+    setActionLoading(null);
+    if (res?.success && res.uid) {
+      setNfcRead({ uid: res.uid, chipType: res.chipType ?? "?" });
+      showToast(`${res.chipType} card — UID ${res.uid}`, "success");
+    } else {
+      setNfcRead(null);
+      showToast(res?.message ?? "NFC read failed", "error");
+    }
   };
   const handleEject = async () => {
     setActionLoading("eject");
@@ -654,6 +667,31 @@ export default function DevicePage() {
             boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
           }}
         >
+          <button
+            onClick={handleReadNfc}
+            disabled={connState !== "connected" || actionLoading === "nfc"}
+            style={{
+              backgroundColor: actionLoading === "nfc" ? "#818cf8" : "#6366f1",
+              color: "#ffffff",
+              borderRadius: 8,
+              padding: "10px 20px",
+              fontSize: 13,
+              fontWeight: 600,
+              opacity: connState !== "connected" ? 0.5 : 1,
+            }}
+            className="hover:opacity-90 transition-opacity flex items-center gap-2 disabled:cursor-not-allowed"
+          >
+            {actionLoading === "nfc" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Nfc className="w-4 h-4" />}
+            {actionLoading === "nfc" ? "Reading..." : "Read NFC"}
+          </button>
+          {nfcRead && (
+            <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500">
+                {nfcRead.chipType}
+              </span>
+              <span className="font-mono text-xs text-indigo-900 break-all">{nfcRead.uid}</span>
+            </div>
+          )}
           <button
             onClick={handleEject}
             disabled={connState !== "connected" || actionLoading === "eject"}

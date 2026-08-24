@@ -136,6 +136,15 @@ export function decodeErrorCode(code: number): string {
     0x02: "Data error",
     0x03: "Not executable",
     0x04: "Execution failed",
+    // Contactless (RF) card operation errors
+    0x41: "Search card failure",
+    0x42: "Read serial number failure",
+    0x43: "Check password error",
+    0x44: "Choose card error",
+    0x45: "Read data failure",
+    0x46: "Write data failure",
+    0x49: "Increment failure",
+    0x4a: "Devalue failure",
     0xC7: "Dispense failed (card pick/sensor issue)",
   };
   return map[code] ?? `Unknown error (0x${code.toString(16).padStart(2, "0")})`;
@@ -155,4 +164,134 @@ export function bytesToHex(data: Uint8Array | number[]): string {
   return Array.from(data)
     .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
     .join(" ");
+}
+
+// ─── Contactless (NFC) card commands ──────────────────────────────────
+//
+// Command byte pairs are CM (chip family) + PM (operation), per the K750
+// protocol "Command list 1". Packet framing is identical to the movement
+// commands, so buildPacket() is reused.
+//
+// Note: the vendor doc prints a few wrong SELEN values in the contactless
+// section (e.g. TypeA activate shown as len 0x03 for a 2-byte payload).
+// buildPacket() always derives SELEN from the real payload length.
+
+export const CM_S50 = 0x3b;
+export const CM_S70 = 0x3c;
+export const CM_UL = 0x3d;
+export const CM_TYPEA = 0x47;
+
+export type NfcChipType = "S50" | "S70" | "UL" | "TypeA";
+
+/** Chip families probed by readNfcCard(), in detection order. */
+export const NFC_CHIP_TYPES: NfcChipType[] = ["S50", "S70", "UL", "TypeA"];
+
+const CHIP_CM: Record<NfcChipType, number> = {
+  S50: CM_S50,
+  S70: CM_S70,
+  UL: CM_UL,
+  TypeA: CM_TYPEA,
+};
+
+export function chipCommandCode(chip: NfcChipType): number {
+  return CHIP_CM[chip];
+}
+
+export function buildNfcPacket(
+  chip: NfcChipType,
+  pm: number,
+  params: number[] = [],
+  addH = DEFAULT_ADDH,
+  addL = DEFAULT_ADDL
+): Uint8Array {
+  return buildPacket([CHIP_CM[chip], pm, ...params], addH, addL);
+}
+
+/** PM codes per chip family. TypeA has no separate serial-number read —
+ *  its activate response already carries the UID. */
+export const NFC_PM = {
+  S50: { search: 0x30, serial: 0x31, auth: 0x32, read: 0x33, halt: 0x38 },
+  S70: { search: 0x30, serial: 0x31, auth: 0x32, read: 0x33, halt: 0x38 },
+  UL: { search: 0x30, serial: 0x31, read: 0x32, halt: 0x34 },
+  TypeA: { search: 0x30, halt: 0x35 },
+} as const;
+
+/** Search card (TypeA: activate card — the response carries the UID). */
+export function buildNfcSearchPacket(chip: NfcChipType, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildNfcPacket(chip, NFC_PM[chip].search, [], addH, addL);
+}
+
+/** Read card serial number (S50/S70: 4 bytes, UL: 7 bytes). Not valid for TypeA. */
+export function buildNfcSerialPacket(chip: NfcChipType, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  const pm = chip === "TypeA" ? undefined : NFC_PM[chip].serial;
+  if (pm === undefined) throw new Error("TypeA has no read-serial command; use the activate response UID");
+  return buildNfcPacket(chip, pm, [], addH, addL);
+}
+
+/** Check sector password before reading an S50/S70 block.
+ *  keyType: "A" checks KEYA, "B" checks KEYB. key must be 6 bytes. */
+export function buildNfcAuthPacket(
+  chip: "S50" | "S70",
+  blockAddr: number,
+  key: number[],
+  keyType: "A" | "B" = "A",
+  addH = DEFAULT_ADDH,
+  addL = DEFAULT_ADDL
+): Uint8Array {
+  if (key.length !== 6) throw new Error("Mifare key must be 6 bytes");
+  const pswType = keyType === "A" ? 0x30 : 0x31;
+  return buildNfcPacket(chip, NFC_PM[chip].auth, [blockAddr & 0xff, pswType, ...key], addH, addL);
+}
+
+/** Read one 16-byte data block. */
+export function buildNfcReadBlockPacket(
+  chip: "S50" | "S70" | "UL",
+  blockAddr: number,
+  addH = DEFAULT_ADDH,
+  addL = DEFAULT_ADDL
+): Uint8Array {
+  return buildNfcPacket(chip, NFC_PM[chip].read, [blockAddr & 0xff], addH, addL);
+}
+
+/** Close down / halt the card so the field is released. */
+export function buildNfcHaltPacket(chip: NfcChipType, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildNfcPacket(chip, NFC_PM[chip].halt, [], addH, addL);
+}
+
+export interface CardResponse {
+  ok: boolean;
+  cm: number;
+  pm: number;
+  /** Payload after P/N + CM + PM — the serial number or data block on success. */
+  data: number[];
+  errorCode?: number;
+  errorName?: string;
+}
+
+/**
+ * Parse a contactless-card response frame.
+ *   success: STX ADDH ADDL LH LL 0x50 CM PM [data...] ETX BCC
+ *   failure: STX ADDH ADDL LH LL 0x4E CM PM ERR_CD  ETX BCC
+ * Returns null if the frame is malformed or answers a different command.
+ */
+export function parseCardResponse(response: number[], cm: number, pm: number): CardResponse | null {
+  if (response.length < 8 || response[0] !== STX) return null;
+  const len = (response[3] << 8) | response[4];
+  if (len < 3 || response.length < len + 7) return null;
+  const payload = response.slice(5, 5 + len);
+  const kind = payload[0];
+  if (kind !== 0x50 && kind !== 0x4e) return null;
+  if (payload[1] !== cm || payload[2] !== pm) return null;
+  if (kind === 0x4e) {
+    const code = payload[3] ?? 0;
+    return { ok: false, cm, pm, data: [], errorCode: code, errorName: decodeErrorCode(code) };
+  }
+  return { ok: true, cm, pm, data: payload.slice(3) };
+}
+
+/** Hex string with no separators — the form used for card UIDs. */
+export function bytesToHexCompact(data: Uint8Array | number[]): string {
+  return Array.from(data)
+    .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+    .join("");
 }

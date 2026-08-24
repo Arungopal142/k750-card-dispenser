@@ -79,6 +79,9 @@ export interface CardIssue {
   purpose?: string;
   nationalId?: string;
   source?: "K750" | "VMS";
+  /** UID read from the card's NFC chip at issue time. */
+  cardUid?: string;
+  chipType?: string;
 }
 
 export interface ActivityLog {
