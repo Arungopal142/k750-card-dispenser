@@ -527,6 +527,25 @@ export function buildNfcSearchPacket(chip: NfcChipType, addH = DEFAULT_ADDH, add
   return buildNfcPacket(chip, NFC_PM[chip].search, [], addH, addL);
 }
 
+/**
+ * TypeA activate with an explicit parameter byte.
+ *
+ * The bare two-byte form (0x47 0x30) is what the DLL guide implies — its
+ * K720_CPUCardPowerOn takes no input beyond the device address — but real
+ * hardware answers NF 47 30 01 "Command parameter error" to it, while the same
+ * firmware answers S50/S70/UL searches with a normal card-level 0x41. The
+ * protocol doc prints SELEN 0x03 for every command in the TypeA section, which
+ * is one more than the two bytes it then lists, so a third byte does look
+ * expected. Its value is not documented anywhere in the reference set; this
+ * exists so the fallback in nfcSearch() can probe for it against hardware.
+ */
+export function buildTypeAActivatePacket(param: number, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
+  return buildNfcPacket("TypeA", NFC_PM.TypeA.search, [param & 0xff], addH, addL);
+}
+
+/** Parameter bytes tried, in order, when bare TypeA activate is rejected. */
+export const TYPEA_ACTIVATE_PROBES = [0x30, 0x00, 0x26] as const;
+
 /** Read card serial number (S50/S70: 4 bytes, UL: 7 bytes). Not valid for TypeA. */
 export function buildNfcSerialPacket(chip: "S50" | "S70" | "UL", addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
   return buildNfcPacket(chip, NFC_PM[chip].serial, [], addH, addL);

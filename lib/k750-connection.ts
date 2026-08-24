@@ -7,6 +7,7 @@ import {
   buildFD2Packet, buildFD3Packet, buildFD4Packet, buildBEPacket, buildBDPacket,
   buildFC1Packet, buildFRPacket, addressBytes,
   buildRFPacket, buildFC2Packet, buildBFPacket, buildBGPacket,
+  buildTypeAActivatePacket, TYPEA_ACTIVATE_PROBES,
   buildCSPacket, buildLPPacket, buildLFPacket, type BaudRate,
   buildNfcSearchPacket, buildNfcSerialPacket, buildNfcAuthPacket,
   buildNfcReadBlockPacket, buildNfcHaltPacket,
@@ -42,6 +43,10 @@ export interface NfcBlockResult {
 // search is retried a few times before a chip family is ruled out.
 const NFC_SEARCH_RETRIES = 2;
 const NFC_SEARCH_DELAY = 150;
+// How long to wait for the transport to stop before searching, and how long to
+// let the card sit still over the antenna once it has.
+const NFC_SETTLE_TIMEOUT = 3000;
+const NFC_SETTLE_DELAY = 300;
 /** Factory-default Mifare key — used when readNfcBlock() is called without one. */
 const DEFAULT_MIFARE_KEY = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
 
@@ -763,8 +768,56 @@ export class K750Connection {
       );
       if (res?.ok) return res.data;
       if (res && !res.ok) this.log("INFO", [], `NFC ${chip} search: ${res.errorName}`);
+
+      // 0x01 is "command parameter error", not a card-level failure — the
+      // device rejected the packet itself. Only TypeA does this, and only for
+      // the bare two-byte activate; probe the documented third byte so the
+      // comm log shows which value the firmware accepts.
+      if (chip === "TypeA" && res && !res.ok && res.errorCode === 0x01) {
+        for (const param of TYPEA_ACTIVATE_PROBES) {
+          const probe = await this.nfcTransact(
+            buildTypeAActivatePacket(param, this.addH, this.addL),
+            chip,
+            NFC_PM.TypeA.search
+          );
+          this.log("INFO", [], `NFC TypeA activate probe 0x${param.toString(16).padStart(2, "0")}: ${probe?.ok ? "ACCEPTED" : probe?.errorName ?? "no response"}`);
+          if (probe?.ok) return probe.data;
+          // A card-level error means the packet was well formed; stop probing.
+          if (probe && probe.errorCode !== 0x01) break;
+        }
+      }
     }
     return null;
+  }
+
+  /**
+   * Wait for the transport to stop and the card to be sitting at the reader.
+   *
+   * dispenseFC7() returns as soon as B4 bit2 goes high, but the motor is often
+   * still running (B2 = 0x08 "sending card") and the card is not yet over the
+   * RF antenna. Searching in that window makes every chip family answer
+   * "Search card failure" (0x41).
+   */
+  private async waitForCardSettled(timeoutMs = NFC_SETTLE_TIMEOUT): Promise<DeviceStatus | null> {
+    const t0 = Date.now();
+    let last: DeviceStatus | null = null;
+    let n = 0;
+    while (Date.now() - t0 < timeoutMs) {
+      const st = await this.queryAP();
+      if (st) {
+        last = st;
+        n++;
+        const settled = !st.flags.cardIssuing && !st.flags.cardCollecting && st.flags.cardAtSensor3;
+        this.log("INFO", [], `NFC settle #${n}: B2=0x${st.raw.byte2.toString(16).padStart(2, "0")} B4=0x${st.raw.byte4.toString(16).padStart(2, "0")} settled=${settled}`);
+        if (settled) {
+          await this.delay(NFC_SETTLE_DELAY);
+          return st;
+        }
+      }
+      await this.delay(200);
+    }
+    this.log("INFO", [], "NFC settle: transport still busy at timeout — searching anyway");
+    return last;
   }
 
   private async nfcHalt(chip: NfcChipType): Promise<void> {
@@ -786,15 +839,14 @@ export class K750Connection {
     const { requireCardAtReader = true } = options;
     if (!this.isConnected) return { success: false, message: "Device not connected." };
 
+    this.log("INFO", [], "=== NFC read ===");
+    const settled = await this.waitForCardSettled();
     if (requireCardAtReader) {
-      const status = await this.queryAP();
-      if (!status) return { success: false, message: "No response from device." };
-      if (!status.flags.cardAtSensor3) {
+      if (!settled) return { success: false, message: "No response from device." };
+      if (!settled.flags.cardAtSensor3) {
         return { success: false, message: "No card at the reader position — dispense a card first." };
       }
     }
-
-    this.log("INFO", [], "=== NFC read ===");
     for (const chip of NFC_CHIP_TYPES) {
       const searchData = await this.nfcSearch(chip);
       if (searchData === null) continue;
