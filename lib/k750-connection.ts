@@ -6,12 +6,42 @@ import {
   buildCPPacket, buildFC0Packet, buildFC4Packet, buildFC6Packet, buildFC8Packet,
   buildFD2Packet, buildFD3Packet, buildFD4Packet, buildBEPacket, buildBDPacket,
   buildFC1Packet, buildFRPacket, addressBytes,
-  bytesToHex, parseNFResponse,
+  buildNfcSearchPacket, buildNfcSerialPacket, buildNfcAuthPacket,
+  buildNfcReadBlockPacket, buildNfcHaltPacket,
+  chipCommandCode, parseCardResponse, NFC_PM, NFC_CHIP_TYPES,
+  bytesToHex, bytesToHexCompact, parseNFResponse,
   parseAPStatusFromResponse, parseFC1Response, parseFRResponse,
+  type NfcChipType,
   type StatusBytes,
   type StatusFlags, getStatusFlags,
   type DevicePosition,
 } from "./k750-protocol";
+
+export type { NfcChipType } from "./k750-protocol";
+
+export interface NfcReadResult {
+  success: boolean;
+  message: string;
+  chipType?: NfcChipType;
+  /** Uppercase hex, no separators (e.g. "04A23F19"). */
+  uid?: string;
+  uidBytes?: number[];
+}
+
+export interface NfcBlockResult {
+  success: boolean;
+  message: string;
+  /** The 16 raw bytes of the block. */
+  data?: number[];
+  hex?: string;
+}
+
+// The RF field needs a moment to settle after a card lands at the reader, so a
+// search is retried a few times before a chip family is ruled out.
+const NFC_SEARCH_RETRIES = 2;
+const NFC_SEARCH_DELAY = 150;
+/** Factory-default Mifare key — used when readNfcBlock() is called without one. */
+const DEFAULT_MIFARE_KEY = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
 
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
 
@@ -637,6 +667,135 @@ export class K750Connection {
       this.log("INFO", [], `GV: ${ver}`);
       return ver;
     } catch { return null; }
+  }
+
+  // ─── Contactless (NFC) card read ─────────────────────────
+
+  /** Run one contactless command and decode its P/N response frame. */
+  private async nfcTransact(packet: Uint8Array, chip: NfcChipType, pm: number) {
+    const resp = await this.transact(packet, true);
+    if (!resp) return null;
+    return parseCardResponse(resp, chipCommandCode(chip), pm);
+  }
+
+  /** Search (TypeA: activate) a card of the given family at the reader. */
+  private async nfcSearch(chip: NfcChipType): Promise<number[] | null> {
+    for (let attempt = 0; attempt <= NFC_SEARCH_RETRIES; attempt++) {
+      if (attempt > 0) await this.delay(NFC_SEARCH_DELAY);
+      const res = await this.nfcTransact(
+        buildNfcSearchPacket(chip, this.addH, this.addL),
+        chip,
+        NFC_PM[chip].search
+      );
+      if (res?.ok) return res.data;
+      if (res && !res.ok) this.log("INFO", [], `NFC ${chip} search: ${res.errorName}`);
+    }
+    return null;
+  }
+
+  private async nfcHalt(chip: NfcChipType): Promise<void> {
+    try {
+      await this.transact(buildNfcHaltPacket(chip, this.addH, this.addL), true);
+    } catch { /* halt is best-effort */ }
+  }
+
+  /**
+   * Read the UID of the card at the reader, probing chip families in order
+   * (S50 → S70 → UL → TypeA) until one answers. The card must already be at
+   * sensor 3 — call dispenseFC7() or enterFC8() first.
+   *
+   * requireCardAtReader (default true) checks AP first so an operator pressing
+   * "Read NFC" on an empty channel gets a clear message instead of four
+   * failed searches.
+   */
+  async readNfcCard(options: { requireCardAtReader?: boolean } = {}): Promise<NfcReadResult> {
+    const { requireCardAtReader = true } = options;
+    if (!this.isConnected) return { success: false, message: "Device not connected." };
+
+    if (requireCardAtReader) {
+      const status = await this.queryAP();
+      if (!status) return { success: false, message: "No response from device." };
+      if (!status.flags.cardAtSensor3) {
+        return { success: false, message: "No card at the reader position — dispense a card first." };
+      }
+    }
+
+    this.log("INFO", [], "=== NFC read ===");
+    for (const chip of NFC_CHIP_TYPES) {
+      const searchData = await this.nfcSearch(chip);
+      if (searchData === null) continue;
+
+      // TypeA activate already returns the UID; the others need a serial read.
+      let uidBytes: number[];
+      if (chip === "TypeA") {
+        uidBytes = searchData;
+      } else {
+        const serial = await this.nfcTransact(
+          buildNfcSerialPacket(chip, this.addH, this.addL),
+          chip,
+          NFC_PM[chip].serial
+        );
+        if (!serial?.ok) {
+          this.log("INFO", [], `NFC ${chip}: serial read failed${serial ? ` — ${serial.errorName}` : " — no response"}`);
+          await this.nfcHalt(chip);
+          continue;
+        }
+        uidBytes = serial.data;
+      }
+
+      if (uidBytes.length === 0) { await this.nfcHalt(chip); continue; }
+
+      const uid = bytesToHexCompact(uidBytes);
+      this.log("INFO", [], `NFC ${chip}: UID ${uid}`);
+      await this.nfcHalt(chip);
+      return { success: true, message: `${chip} card — UID ${uid}`, chipType: chip, uid, uidBytes };
+    }
+
+    this.log("INFO", [], "NFC: no card detected (S50/S70/UL/TypeA all failed)");
+    return { success: false, message: "No NFC card detected at the reader." };
+  }
+
+  /**
+   * Read one 16-byte data block from the card at the reader. S50/S70 blocks are
+   * password-protected, so the sector key is checked first (factory-default key
+   * when none is supplied); UL blocks need no key.
+   */
+  async readNfcBlock(
+    chip: "S50" | "S70" | "UL",
+    blockAddr: number,
+    key: number[] = DEFAULT_MIFARE_KEY,
+    keyType: "A" | "B" = "A"
+  ): Promise<NfcBlockResult> {
+    if (!this.isConnected) return { success: false, message: "Device not connected." };
+
+    if ((await this.nfcSearch(chip)) === null) {
+      return { success: false, message: `No ${chip} card detected at the reader.` };
+    }
+
+    if (chip !== "UL") {
+      const auth = await this.nfcTransact(
+        buildNfcAuthPacket(chip, blockAddr, key, keyType, this.addH, this.addL),
+        chip,
+        NFC_PM[chip].auth
+      );
+      if (!auth?.ok) {
+        await this.nfcHalt(chip);
+        return { success: false, message: `Key ${keyType} rejected for block ${blockAddr}${auth ? ` — ${auth.errorName}` : ""}.` };
+      }
+    }
+
+    const read = await this.nfcTransact(
+      buildNfcReadBlockPacket(chip, blockAddr, this.addH, this.addL),
+      chip,
+      NFC_PM[chip].read
+    );
+    await this.nfcHalt(chip);
+    if (!read?.ok) {
+      return { success: false, message: `Read of block ${blockAddr} failed${read ? ` — ${read.errorName}` : " — no response"}.` };
+    }
+    const hex = bytesToHex(read.data);
+    this.log("INFO", [], `NFC ${chip} block ${blockAddr}: ${hex}`);
+    return { success: true, message: `Block ${blockAddr} read.`, data: read.data, hex };
   }
 
   async dispenseFC7(): Promise<boolean> {

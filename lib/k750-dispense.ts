@@ -1,4 +1,4 @@
-import type { K750Connection, DeviceStatus } from "./k750-connection";
+import type { K750Connection, DeviceStatus, NfcChipType } from "./k750-connection";
 
 export type ErrorCode =
   | "NOT_CONNECTED"
@@ -22,6 +22,9 @@ export interface IssueResult {
   errorCode?: ErrorCode;
   status?: DeviceStatus;
   warning?: string;
+  /** UID of the dispensed card, when the NFC read succeeded. */
+  uid?: string;
+  chipType?: NfcChipType;
 }
 
 export type FlowProgress = (step: number, total: number, message: string) => void;
@@ -29,6 +32,7 @@ export type FlowProgress = (step: number, total: number, message: string) => voi
 export const ISSUE_STEP_LABELS = [
   "Check machine",
   "Dispense",
+  "Read card",
   "Deliver",
 ] as const;
 
@@ -81,14 +85,26 @@ export class DispenseService {
         return { success: false, message: "Dispense failed — card did not reach reader.", errorCode: "FC7_TIMEOUT" };
       }
 
+      // NFC read while the card is still at the reader. A card with no readable
+      // chip is still a valid issue, so this never fails the flow.
+      step(3, "Reading card...");
+      const nfc = await this.conn.readNfcCard({ requireCardAtReader: false });
+      if (!nfc.success) this.conn.log("INFO", [], `[DISPENSE] NFC read skipped: ${nfc.message}`);
+
       // FC0 eject out of mouth
-      step(3, "Delivering card...");
+      step(4, "Delivering card...");
       if (!(await this.conn.ejectFC0())) {
-        return { success: false, message: "Card not ejected — timeout.", errorCode: "EJECT_TIMEOUT" };
+        return { success: false, message: "Card not ejected — timeout.", errorCode: "EJECT_TIMEOUT", uid: nfc.uid, chipType: nfc.chipType };
       }
 
       this.conn.log("INFO", [], "=== DISPENSE SUCCESS ===");
-      return { success: true, message: `Card issued for ${name} (${employeeId} — ${department}) — please collect the card.` };
+      const uidNote = nfc.uid ? ` UID ${nfc.uid}.` : "";
+      return {
+        success: true,
+        message: `Card issued for ${name} (${employeeId} — ${department}) — please collect the card.${uidNote}`,
+        uid: nfc.uid,
+        chipType: nfc.chipType,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.conn.log("INFO", [], `[DISPENSE] FAILED: ${msg}`);

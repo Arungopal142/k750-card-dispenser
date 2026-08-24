@@ -207,12 +207,13 @@ export default function IssueCardPage() {
           status: res.success ? "Issued" : "Failed",
           source: "K750",
           ...(res.success ? {} : { errorMessage: res.message }),
+          ...(res.uid ? { cardUid: res.uid, chipType: res.chipType } : {}),
         });
         await logActivity({
           userId: user?.uid ?? "",
           userName: profile?.displayName || "Unknown",
           action: "Card Issued",
-          details: `${name} - ${dept} - ${res.success ? "Success" : `Failed: ${res.message}`}`,
+          details: `${name} - ${dept} -${res.uid ? ` UID ${res.uid} -` : ""} ${res.success ? "Success" : `Failed: ${res.message}`}`,
         });
       } catch (dbErr) {
         const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
@@ -414,6 +415,11 @@ export default function IssueCardPage() {
                   {result.success ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : <XCircle className="w-5 h-5 flex-shrink-0" />}
                   <span>
                     {result.message}
+                    {result.uid && (
+                      <span className="block text-xs font-normal opacity-80 mt-1">
+                        {result.chipType} chip — UID <span className="font-mono">{result.uid}</span>
+                      </span>
+                    )}
                     {result.warning && <span className="block text-xs font-normal text-amber-700 mt-1">{result.warning}</span>}
                   </span>
                 </div>

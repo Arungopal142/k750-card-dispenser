@@ -75,6 +75,7 @@ export default function DevicePage() {
   const [issueStep, setIssueStep] = useState(0);
   const [issueStepMsg, setIssueStepMsg] = useState("");
   const [issueResult, setIssueResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [nfcResult, setNfcResult] = useState<{ label: string; value: string } | null>(null);
 
   // --- Issue Log ---
   const [issueLog, setIssueLog] = useState<CardIssue[]>([]);
@@ -1430,6 +1431,80 @@ export default function DevicePage() {
                     {label}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Contactless (NFC) */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Contactless (NFC)
+              </h3>
+              <div className="flex flex-col gap-2">
+                {[
+                  { label: "UID — Read card serial", cmd: "nfcuid", color: "#6366f1" },
+                  { label: "S50 — Read block 4", cmd: "nfcs50", color: "#6366f1" },
+                  { label: "UL — Read page 4", cmd: "nfcul", color: "#6366f1" },
+                ].map(({ label, cmd, color }) => (
+                  <button
+                    key={cmd}
+                    onClick={async () => {
+                      setActionLoading(cmd);
+                      let ok = false;
+                      let extra = "";
+                      switch (cmd) {
+                        case "nfcuid": {
+                          const r = await conn.readNfcCard();
+                          ok = r.success;
+                          extra = r.success ? `${r.chipType} ${r.uid}` : r.message;
+                          setNfcResult(ok ? { label: `${r.chipType} UID`, value: r.uid ?? "" } : null);
+                          break;
+                        }
+                        case "nfcs50": {
+                          const r = await conn.readNfcBlock("S50", 4);
+                          ok = r.success;
+                          extra = r.success ? (r.hex ?? "") : r.message;
+                          setNfcResult(ok ? { label: "S50 block 4", value: r.hex ?? "" } : null);
+                          break;
+                        }
+                        case "nfcul": {
+                          const r = await conn.readNfcBlock("UL", 4);
+                          ok = r.success;
+                          extra = r.success ? (r.hex ?? "") : r.message;
+                          setNfcResult(ok ? { label: "UL page 4", value: r.hex ?? "" } : null);
+                          break;
+                        }
+                      }
+                      setActionLoading(null);
+                      showToast(ok ? `${label.split("—")[0].trim()} OK${extra ? ": " + extra : ""}` : extra || `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color,
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: `1px solid ${color}30`,
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === cmd ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+                {nfcResult && (
+                  <div style={{ marginTop: 4, borderRadius: 6, border: "1px solid #6366f130", backgroundColor: "#eef2ff", padding: "6px 10px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      {nfcResult.label}
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 12, color: "#1e1b4b", wordBreak: "break-all" }}>
+                      {nfcResult.value}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
