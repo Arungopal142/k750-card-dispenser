@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
-import { useK750, getK750Conn } from "../../../lib/k750-context";
-import { getK750Dispense, ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
-import { getK750Collect, CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
+import { useK750, getK750Conn, getK750Dispense, getK750Collect } from "../../../lib/k750-context";
+import { ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
+import { CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
 import type { LogEntry } from "../../../lib/k750-connection";
 import { subscribeAllCardIssues, logCardIssue, updateCardIssue, logActivity, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Hand, Terminal, CreditCard, CreditCard as CardIcon } from "lucide-react";
@@ -167,8 +167,8 @@ export default function DevicePage() {
     showToast("Ejecting card...", "info");
 
     // Attempt 1: Direct DC eject
-    let result = await conn.ejectDC();
-    if (result?.success) {
+    let ejected = await conn.ejectDC();
+    if (ejected) {
       await conn.queryAP();
       setActionLoading(null);
       showToast("Card ejected", "success");
@@ -182,10 +182,10 @@ export default function DevicePage() {
     await conn.queryAP();
 
     showToast("Retrying eject...", "info");
-    result = await conn.ejectDC();
+    ejected = await conn.ejectDC();
     await conn.queryAP();
     setActionLoading(null);
-    showToast(result?.success ? "Card ejected after reset" : "Eject failed — card may be jammed. Remove manually.", result?.success ? "success" : "error");
+    showToast(ejected ? "Card ejected after reset" : "Eject failed — card may be jammed. Remove manually.", ejected ? "success" : "error");
   };
   const handleCollectCard = async () => {
     if (actionLoading === "collect") return;

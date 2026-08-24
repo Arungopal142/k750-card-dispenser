@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
-import { useK750, getK750Conn } from "../../../lib/k750-context";
-import { getK750Dispense, ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
-import { getK750Collect, CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
+import { useK750, getK750Conn, getK750Dispense, getK750Collect } from "../../../lib/k750-context";
+import { ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
+import { CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
 import type { IssueResult } from "../../../lib/k750-dispense";
+import type { CollectResult } from "../../../lib/k750-collect";
 import type { LogEntry } from "../../../lib/k750-connection";
 import { logActivity, subscribeIssuedCards, subscribeAllCardIssues, returnCard, logCardIssue, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { useToast } from "../../../lib/toast-context";
@@ -34,7 +35,7 @@ export default function IssueCardPage() {
   const [empDept, setEmpDept] = useState("");
 
   // --- Visitor Exit state ---
-  const [exitResult, setExitResult] = useState<IssueResult | null>(null);
+  const [exitResult, setExitResult] = useState<CollectResult | null>(null);
   const [exitRunning, setExitRunning] = useState(false);
   const [exitStep, setExitStep] = useState(0);
   const [exitStepMsg, setExitStepMsg] = useState("");

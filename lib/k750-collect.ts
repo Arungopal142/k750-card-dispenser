@@ -16,6 +16,8 @@ export interface CollectResult {
   message: string;
   errorCode?: ErrorCode;
   status?: DeviceStatus;
+  /** Non-fatal problem to surface alongside a successful collect. */
+  warning?: string;
 }
 
 export type FlowProgress = (step: number, total: number, message: string) => void;

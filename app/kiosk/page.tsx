@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useK750, getK750Conn } from "../../lib/k750-context";
-import { getK750Dispense, ISSUE_STEP_LABELS, type IssueResult } from "../../lib/k750-dispense";
+import { useK750, getK750Conn, getK750Dispense } from "../../lib/k750-context";
+import { ISSUE_STEP_LABELS, type IssueResult } from "../../lib/k750-dispense";
 import { logCardIssue } from "../../lib/firestore-service";
 import { useToast } from "../../lib/toast-context";
 import { useAuth } from "../../lib/auth-context";
