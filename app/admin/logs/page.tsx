@@ -73,6 +73,12 @@ export default function LogsPage() {
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const exportCSV = () => {
+    const escapeCSV = (val: string) => {
+      if (val.includes(",") || val.includes('"') || val.includes("\n") || val.includes("\r")) {
+        return `"${val.replace(/"/g, '""')}"`;
+      }
+      return val;
+    };
     const headers = ["Time", "User", "Action", "Details"];
     const rows = filtered.map((l) => [
       l.timestamp ? toDate(l.timestamp).toLocaleString() : "",
@@ -80,7 +86,7 @@ export default function LogsPage() {
       l.action,
       l.details || "",
     ]);
-    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const csv = [headers, ...rows].map((r) => r.map(escapeCSV).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -99,12 +105,12 @@ export default function LogsPage() {
     );
 
   return (
-    <div style={{ background: "#f8fafc", minHeight: "100vh", padding: 32 }}>
+    <div style={{ background: "#f8fafc", minHeight: "100vh" }} className="p-4 sm:p-6 md:p-8">
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ marginBottom: 32 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", marginBottom: 8 }}>
             <div>
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: "#0f172a", margin: 0 }}>Activity Logs</h1>
+              <h1 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: 0 }}>Activity Logs</h1>
               <p style={{ fontSize: 14, color: "#64748b", margin: 0, marginTop: 2 }}>
                 {filtered.length} record{filtered.length !== 1 ? "s" : ""} found
               </p>
@@ -162,7 +168,7 @@ export default function LogsPage() {
           style={{
             display: "flex",
             flexWrap: "wrap",
-            gap: 12,
+            gap: 10,
             marginBottom: 20,
             alignItems: "center",
           }}
@@ -193,10 +199,10 @@ export default function LogsPage() {
                 border: "1px solid #e2e8f0",
                 borderRadius: 6,
                 padding: "8px 12px 8px 32px",
-                fontSize: 13,
+                fontSize: 14,
                 color: "#0f172a",
                 outline: "none",
-                height: 36,
+                height: 40,
                 boxSizing: "border-box",
               }}
             />
@@ -212,10 +218,10 @@ export default function LogsPage() {
               border: "1px solid #e2e8f0",
               borderRadius: 6,
               padding: "8px 12px",
-              fontSize: 13,
+              fontSize: 14,
               color: "#0f172a",
               outline: "none",
-              height: 36,
+              height: 40,
               minWidth: 160,
             }}
           >
@@ -237,10 +243,10 @@ export default function LogsPage() {
               border: "1px solid #e2e8f0",
               borderRadius: 6,
               padding: "8px 12px",
-              fontSize: 13,
+              fontSize: 14,
               color: "#0f172a",
               outline: "none",
-              height: 36,
+              height: 40,
               minWidth: 160,
             }}
           >
@@ -263,10 +269,10 @@ export default function LogsPage() {
               border: "1px solid #e2e8f0",
               borderRadius: 6,
               padding: "8px 12px",
-              fontSize: 13,
+              fontSize: 14,
               color: "#0f172a",
               outline: "none",
-              height: 36,
+              height: 40,
               minWidth: 160,
             }}
           />
@@ -287,22 +293,22 @@ export default function LogsPage() {
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Time
                     </th>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       User
                     </th>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Action
                     </th>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Details
                     </th>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Status
                     </th>
                   </tr>

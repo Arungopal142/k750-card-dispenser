@@ -3,17 +3,20 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
+import { useK750 } from "../../../lib/k750-context";
 import { getSettings, updateSettings } from "../../../lib/firestore-service";
-import { Loader2, Settings } from "lucide-react";
+import { Loader2, Settings, Plus, Minus, Type } from "lucide-react";
 
 type TabKey = "general" | "device" | "security";
 
 export default function SettingsPage() {
-  const { profile, loading, logout } = useAuth();
+  const { profile, loading } = useAuth();
+  const { connState } = useK750();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("general");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const isConnected = connState === "connected";
 
   const [enableDispenser, setEnableDispenser] = useState(true);
   const [allowIssuance, setAllowIssuance] = useState(true);
@@ -29,6 +32,25 @@ export default function SettingsPage() {
 
   const [sessionTimeout, setSessionTimeout] = useState("30");
   const [auditLogging, setAuditLogging] = useState(true);
+
+  const FONT_SIZES = [12, 13, 14, 15, 16] as const;
+  const FONT_LABELS: Record<number, string> = { 12: "Small", 13: "Medium-S", 14: "Medium", 15: "Medium-L", 16: "Large" };
+  const [fontSize, setFontSize] = useState(14);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("app-font-size");
+    if (saved) setFontSize(Number(saved));
+  }, []);
+
+  const changeFontSize = (delta: number) => {
+    setFontSize((prev) => {
+      const idx = FONT_SIZES.indexOf(prev as typeof FONT_SIZES[number]);
+      const next = FONT_SIZES[Math.max(0, Math.min(FONT_SIZES.length - 1, idx + delta))];
+      localStorage.setItem("app-font-size", String(next));
+      document.documentElement.style.fontSize = `${next}px`;
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!loading && (!profile || profile.role !== "admin")) router.replace("/login");
@@ -74,11 +96,6 @@ export default function SettingsPage() {
     setSaved(true);
     setSaving(false);
     setTimeout(() => setSaved(false), 2000);
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/admin-login");
   };
 
   if (loading || !profile) {
@@ -133,7 +150,7 @@ export default function SettingsPage() {
     border: "1px solid #cbd5e1",
     borderRadius: 6,
     padding: "8px 12px",
-    fontSize: 13,
+    fontSize: 14,
     color: "#0f172a",
     outline: "none",
     width: "100%",
@@ -155,7 +172,7 @@ export default function SettingsPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid #f1f5f9" }}>
         <div>
           <p style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", margin: 0 }}>Enable Dispenser</p>
-          <p style={{ fontSize: 12, color: "#64748b", margin: 0, marginTop: 2 }}>Turn on/off the card dispenser device</p>
+          <p style={{ fontSize: 13, color: "#64748b", margin: 0, marginTop: 2 }}>Turn on/off the card dispenser device</p>
         </div>
         <ToggleSwitch checked={enableDispenser} onChange={setEnableDispenser} />
       </div>
@@ -163,7 +180,7 @@ export default function SettingsPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid #f1f5f9" }}>
         <div>
           <p style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", margin: 0 }}>Allow Issuance</p>
-          <p style={{ fontSize: 12, color: "#64748b", margin: 0, marginTop: 2 }}>Allow cards to be issued to users</p>
+          <p style={{ fontSize: 13, color: "#64748b", margin: 0, marginTop: 2 }}>Allow cards to be issued to users</p>
         </div>
         <ToggleSwitch checked={allowIssuance} onChange={setAllowIssuance} />
       </div>
@@ -171,9 +188,54 @@ export default function SettingsPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" }}>
         <div>
           <p style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", margin: 0 }}>Allow Collection</p>
-          <p style={{ fontSize: 12, color: "#64748b", margin: 0, marginTop: 2 }}>Allow cards to be collected/returned</p>
+          <p style={{ fontSize: 13, color: "#64748b", margin: 0, marginTop: 2 }}>Allow cards to be collected/returned</p>
         </div>
         <ToggleSwitch checked={allowCollection} onChange={setAllowCollection} />
+      </div>
+
+      <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 24 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", margin: "0 0 4px" }}>
+          Display
+        </h3>
+        <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
+          Adjust text size across the app
+        </p>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Type style={{ width: 18, height: 18, color: "#64748b" }} />
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", margin: 0 }}>Font Size</p>
+            <p style={{ fontSize: 13, color: "#64748b", margin: 0, marginTop: 2 }}>{FONT_LABELS[fontSize]} ({fontSize}px)</p>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={() => changeFontSize(-1)}
+            disabled={fontSize <= FONT_SIZES[0]}
+            style={{
+              width: 32, height: 32, borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center", cursor: fontSize <= FONT_SIZES[0] ? "not-allowed" : "pointer",
+              opacity: fontSize <= FONT_SIZES[0] ? 0.4 : 1, transition: "all 0.15s",
+            }}
+          >
+            <Minus style={{ width: 14, height: 14, color: "#475569" }} />
+          </button>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", minWidth: 24, textAlign: "center" }}>{fontSize}</span>
+          <button
+            onClick={() => changeFontSize(1)}
+            disabled={fontSize >= FONT_SIZES[FONT_SIZES.length - 1]}
+            style={{
+              width: 32, height: 32, borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: fontSize >= FONT_SIZES[FONT_SIZES.length - 1] ? "not-allowed" : "pointer",
+              opacity: fontSize >= FONT_SIZES[FONT_SIZES.length - 1] ? 0.4 : 1, transition: "all 0.15s",
+            }}
+          >
+            <Plus style={{ width: 14, height: 14, color: "#475569" }} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -206,7 +268,7 @@ export default function SettingsPage() {
           }}
         >
           <span style={{ fontSize: 13, color: "#475569" }}>{connection}</span>
-          <span style={{ marginLeft: "auto", fontSize: 11, color: "#16a34a", fontWeight: 600 }}>Connected</span>
+          <span style={{ marginLeft: "auto", fontSize: 11, color: isConnected ? "#16a34a" : "#dc2626", fontWeight: 600 }}>{isConnected ? "Connected" : "Disconnected"}</span>
         </div>
       </div>
 
@@ -260,7 +322,7 @@ export default function SettingsPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" }}>
         <div>
           <p style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", margin: 0 }}>Audit Logging</p>
-          <p style={{ fontSize: 12, color: "#64748b", margin: 0, marginTop: 2 }}>Log all user actions for audit trail</p>
+          <p style={{ fontSize: 13, color: "#64748b", margin: 0, marginTop: 2 }}>Log all user actions for audit trail</p>
         </div>
         <ToggleSwitch checked={auditLogging} onChange={setAuditLogging} />
       </div>
@@ -274,7 +336,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div style={{ background: "#f8fafc", minHeight: "100vh", padding: 32 }}>
+    <div className="p-4 sm:p-6 md:p-8" style={{ background: "#f8fafc", minHeight: "100vh" }}>
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ marginBottom: 32 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
@@ -282,7 +344,7 @@ export default function SettingsPage() {
               <Settings style={{ width: 22, height: 22, color: "#fff" }} />
             </div>
             <div>
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: "#0f172a", margin: 0 }}>Settings</h1>
+              <h1 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: 0 }}>Settings</h1>
               <p style={{ fontSize: 14, color: "#64748b", margin: 0, marginTop: 2 }}>
                 Configure system preferences
               </p>
@@ -290,7 +352,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+        <div className="flex flex-col md:flex-row gap-6" style={{ alignItems: "flex-start" }}>
           <div
             style={{
               width: 180,
@@ -310,8 +372,8 @@ export default function SettingsPage() {
                   width: "100%",
                   textAlign: "left",
                   padding: "12px 16px",
-                  fontSize: 13,
-                  fontWeight: activeTab === tab.key ? 600 : 400,
+                    fontSize: 14,
+                    fontWeight: activeTab === tab.key ? 600 : 400,
                   color: activeTab === tab.key ? "#2563eb" : "#475569",
                   background: activeTab === tab.key ? "#eff6ff" : "transparent",
                   border: "none",
@@ -340,31 +402,12 @@ export default function SettingsPage() {
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "space-between",
+                  justifyContent: "flex-end",
                   marginTop: 32,
                   paddingTop: 24,
                   borderTop: "1px solid #f1f5f9",
                 }}
               >
-                <button
-                  onClick={handleLogout}
-                  style={{
-                    background: "rgba(220,38,38,0.08)",
-                    color: "#dc2626",
-                    border: "none",
-                    borderRadius: 6,
-                    padding: "8px 16px",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    transition: "background 0.15s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(220,38,38,0.15)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(220,38,38,0.08)")}
-                >
-                  Logout
-                </button>
-
                 <button
                   onClick={handleSave}
                   disabled={saving}

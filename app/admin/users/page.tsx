@@ -32,13 +32,31 @@ export default function UsersPage() {
 
   useEffect(() => {
     if (profile?.role !== "admin") return;
-    loadUsers();
-    const interval = setInterval(loadUsers, 10000);
-    return () => clearInterval(interval);
+    // Load inside the effect (and ignore a late response after unmount) rather
+    // than calling the shared loader synchronously from the effect body.
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await getAllUsers();
+        if (!cancelled) { setUsers(data); setError(null); }
+      } catch {
+        if (!cancelled) setError("Failed to load users.");
+      }
+    };
+    load();
+    const interval = setInterval(load, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [profile]);
 
-  const handleToggleActive = async (u: UserProfile) => {
+  const handleToggleRole = async (u: UserProfile) => {
+    if (u.uid === profile?.uid) { setError("Cannot change your own role."); return; }
     await updateUser(u.uid, { role: u.role === "admin" ? "user" : "admin" });
+    await loadUsers();
+  };
+
+  const handleToggleActive = async (u: UserProfile) => {
+    if (u.uid === profile?.uid) { setError("Cannot deactivate your own account."); return; }
+    await updateUser(u.uid, { active: u.active === false ? true : false });
     await loadUsers();
   };
 
@@ -49,6 +67,8 @@ export default function UsersPage() {
   };
 
   const handleDelete = async (uid: string) => {
+    if (uid === profile?.uid) { setError("Cannot delete your own account."); return; }
+    if (!confirm("Are you sure you want to delete this user? This action cannot be undone.")) return;
     setDeleting(uid);
     try {
       await deleteUser(uid);
@@ -74,15 +94,15 @@ export default function UsersPage() {
     );
 
   return (
-    <div style={{ background: "#f8fafc", minHeight: "100vh", padding: 32 }}>
+    <div style={{ background: "#f8fafc", minHeight: "100vh" }} className="p-4 sm:p-6 md:p-8">
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ marginBottom: 32 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-3 mb-2">
             <div style={{ width: 40, height: 40, borderRadius: 10, background: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <UserCog style={{ width: 22, height: 22, color: "#fff" }} />
             </div>
             <div>
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: "#0f172a", margin: 0 }}>User Management</h1>
+              <h1 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: 0 }}>User Management</h1>
               <p style={{ fontSize: 14, color: "#64748b", margin: 0, marginTop: 2 }}>
                 {users.length} registered user{users.length !== 1 ? "s" : ""}
               </p>
@@ -125,25 +145,25 @@ export default function UsersPage() {
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       User
                     </th>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Email
                     </th>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Role
                     </th>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Status
                     </th>
-                    <th style={{ textAlign: "left", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                      Last Login
+                    <th style={{ textAlign: "left", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Last Updated
                     </th>
-                    <th style={{ textAlign: "right", padding: "12px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <th style={{ textAlign: "right", padding: "14px 16px", color: "#64748b", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Actions
                     </th>
                   </tr>
@@ -187,11 +207,11 @@ export default function UsersPage() {
                                 border: "1px solid #cbd5e1",
                                 borderRadius: 6,
                                 padding: "6px 10px",
-                                fontSize: 13,
+                                fontSize: 14,
                                 color: "#0f172a",
                                 outline: "none",
                                 width: 140,
-                                height: 36,
+                                height: 40,
                               }}
                             />
                           ) : (
@@ -210,10 +230,10 @@ export default function UsersPage() {
                               border: "1px solid #cbd5e1",
                               borderRadius: 6,
                               padding: "6px 10px",
-                              fontSize: 13,
+                              fontSize: 14,
                               color: "#0f172a",
                               outline: "none",
-                              height: 36,
+                              height: 40,
                             }}
                           >
                             <option value="admin">Admin</option>
@@ -245,12 +265,12 @@ export default function UsersPage() {
                               width: 8,
                               height: 8,
                               borderRadius: "50%",
-                              background: u.role === "admin" ? "#16a34a" : "#16a34a",
+                              background: u.active !== false ? "#16a34a" : "#dc2626",
                               flexShrink: 0,
                             }}
                           />
                           <span style={{ fontSize: 12, color: "#475569" }}>
-                            {u.role === "admin" ? "Active" : "Active"}
+                            {u.active !== false ? "Active" : "Inactive"}
                           </span>
                         </div>
                       </td>
@@ -268,7 +288,7 @@ export default function UsersPage() {
                                 border: "none",
                                 borderRadius: 6,
                                 padding: "6px 14px",
-                                fontSize: 12,
+                                fontSize: 13,
                                 fontWeight: 600,
                                 cursor: "pointer",
                                 transition: "background 0.15s",
@@ -286,7 +306,7 @@ export default function UsersPage() {
                                 border: "1px solid #e2e8f0",
                                 borderRadius: 6,
                                 padding: "6px 14px",
-                                fontSize: 12,
+                                fontSize: 13,
                                 fontWeight: 500,
                                 cursor: "pointer",
                                 transition: "background 0.15s",
@@ -307,7 +327,7 @@ export default function UsersPage() {
                                 border: "1px solid #e2e8f0",
                                 borderRadius: 6,
                                 padding: "6px 14px",
-                                fontSize: 12,
+                                fontSize: 13,
                                 fontWeight: 500,
                                 cursor: "pointer",
                                 transition: "background 0.15s",
@@ -318,14 +338,14 @@ export default function UsersPage() {
                               Edit
                             </button>
                             <button
-                              onClick={() => handleToggleActive(u)}
+                              onClick={() => handleToggleRole(u)}
                               style={{
                                 background: u.role === "admin" ? "rgba(217,119,6,0.08)" : "rgba(37,99,235,0.08)",
                                 color: u.role === "admin" ? "#d97706" : "#2563eb",
                                 border: "none",
                                 borderRadius: 6,
                                 padding: "6px 14px",
-                                fontSize: 12,
+                                fontSize: 13,
                                 fontWeight: 500,
                                 cursor: "pointer",
                                 transition: "background 0.15s",
@@ -336,6 +356,24 @@ export default function UsersPage() {
                               {u.role === "admin" ? "Demote" : "Promote"}
                             </button>
                             <button
+                              onClick={() => handleToggleActive(u)}
+                              style={{
+                                background: u.active !== false ? "rgba(220,38,38,0.08)" : "rgba(22,163,74,0.08)",
+                                color: u.active !== false ? "#dc2626" : "#16a34a",
+                                border: "none",
+                                borderRadius: 6,
+                                padding: "6px 14px",
+                                fontSize: 13,
+                                fontWeight: 500,
+                                cursor: "pointer",
+                                transition: "background 0.15s",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = u.active !== false ? "rgba(220,38,38,0.15)" : "rgba(22,163,74,0.15)")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = u.active !== false ? "rgba(220,38,38,0.08)" : "rgba(22,163,74,0.08)")}
+                            >
+                              {u.active !== false ? "Deactivate" : "Activate"}
+                            </button>
+                            <button
                               onClick={() => handleDelete(u.uid)}
                               disabled={deleting === u.uid}
                               style={{
@@ -344,7 +382,7 @@ export default function UsersPage() {
                                 border: "none",
                                 borderRadius: 6,
                                 padding: "6px 14px",
-                                fontSize: 12,
+                                fontSize: 13,
                                 fontWeight: 500,
                                 cursor: deleting === u.uid ? "not-allowed" : "pointer",
                                 transition: "background 0.15s",

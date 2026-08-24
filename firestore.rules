@@ -55,14 +55,15 @@ service cloud.firestore {
     }
 
     // ==================== CARD ISSUES ====================
-    match /card_issues/{logId} {
-      // Read: own cards OR admin
-      allow read: if isActiveUser() && (
-        resource.data.issuedById == request.auth.uid
-        || isAdmin()
-      );
+    // Collection names must match lib/firestore-service.ts exactly. They used to
+    // be snake_case here (card_issues / activity_logs / device_logs) while the
+    // client wrote camelCase, so none of these rules ever applied to real data —
+    // every read and write hit the default-deny path instead.
+    match /cardIssues/{logId} {
+      // Read: any active user (including kiosk anonymous users)
+      allow read: if isActiveUser();
 
-      // Create: any active user (operator issues card)
+      // Create: any active user (operator issues card) — issuedById must match caller
       allow create: if isActiveUser()
         && request.resource.data.issuedById == request.auth.uid;
 
@@ -77,7 +78,7 @@ service cloud.firestore {
     }
 
     // ==================== ACTIVITY LOGS ====================
-    match /activity_logs/{logId} {
+    match /activityLogs/{logId} {
       // Read: admin only
       allow read: if isAdmin();
 
@@ -89,7 +90,7 @@ service cloud.firestore {
     }
 
     // ==================== DEVICE LOGS ====================
-    match /device_logs/{logId} {
+    match /deviceLogs/{logId} {
       // Read: admin only
       allow read: if isAdmin();
 

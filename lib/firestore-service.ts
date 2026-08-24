@@ -42,6 +42,7 @@ export interface UserProfile {
   email: string;
   displayName: string;
   role: "admin" | "user";
+  active?: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -66,7 +67,7 @@ export interface CardIssue {
   issuedBy: string;
   issuedById: string;
   issuedAt: unknown;
-  status: "Processing" | "Issued" | "Failed" | "Collected";
+  status: "Processing" | "Issued" | "Failed" | "Collected" | "Returned";
   checkoutAt?: unknown;
   checkedOutBy?: string;
   deviceId?: string;
@@ -79,6 +80,8 @@ export interface CardIssue {
   purpose?: string;
   nationalId?: string;
   source?: "K750" | "VMS";
+  /** Where the card physically went when it was checked back in. */
+  returnedTo?: "stack" | "recycle";
   /** UID read from the card's NFC chip at issue time. */
   cardUid?: string;
   chipType?: string;
@@ -195,6 +198,84 @@ export async function getAllCardIssues(): Promise<CardIssue[]> {
   );
 }
 
+export async function getIssuedCards(): Promise<CardIssue[]> {
+  const q = query(
+    collection(getDb(), "cardIssues"),
+    where("status", "==", "Issued"),
+    orderBy("issuedAt", "desc")
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(
+    (d) => ({ id: d.id, ...d.data() } as CardIssue)
+  );
+}
+
+/**
+ * Live view of the cards that are currently out with a visitor.
+ *
+ * Replaces the 10-second getIssuedCards() poll on the checkout screen. The
+ * error callback matters: this query needs the composite index
+ * (status ASC, issuedAt DESC) from firestore.indexes.json, and without it
+ * Firestore rejects the query — which previously surfaced as a permanently
+ * empty "No issued cards to return" list.
+ */
+export function subscribeIssuedCards(
+  callback: (issues: CardIssue[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const q = query(
+    collection(getDb(), "cardIssues"),
+    where("status", "==", "Issued"),
+    orderBy("issuedAt", "desc")
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as CardIssue)));
+    },
+    (error) => onError?.(error)
+  );
+}
+
+export function subscribeRecycledCards(
+  callback: (count: number) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const q = query(
+    collection(getDb(), "cardIssues"),
+    where("status", "==", "Collected"),
+    where("returnedTo", "==", "recycle")
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      callback(snapshot.size);
+    },
+    (error) => onError?.(error)
+  );
+}
+
+/**
+ * Mark a card as checked back in.
+ *
+ * Writes status "Collected", not "Returned": every other screen (admin
+ * dashboard, reports, my-cards, subscribeStats) counts "Collected", and
+ * admin/cards has no badge style for "Returned", so a returned card used to
+ * disappear from the collected totals.
+ */
+export async function returnCard(
+  id: string,
+  returnedBy: string,
+  returnedTo: "stack" | "recycle" = "stack"
+): Promise<void> {
+  await updateDoc(doc(getDb(), "cardIssues", id), {
+    status: "Collected",
+    checkoutAt: serverTimestamp(),
+    checkedOutBy: returnedBy,
+    returnedTo,
+  });
+}
+
 export async function getMyCardIssues(
   issuedById: string
 ): Promise<CardIssue[]> {
@@ -209,53 +290,56 @@ export async function getMyCardIssues(
   );
 }
 
+// Every subscription takes an onError callback. Without one, a Firestore
+// rejection (rules or a missing index) surfaces as an unhandled exception and
+// Next.js replaces the page with a runtime-error overlay.
 export function subscribeAllCardIssues(
-  callback: (issues: CardIssue[]) => void
+  callback: (issues: CardIssue[]) => void,
+  onError?: (error: Error) => void
 ): () => void {
   const q = query(
     collection(getDb(), "cardIssues"),
     orderBy("issuedAt", "desc")
   );
-  return onSnapshot(q, (snapshot) => {
-    const issues = snapshot.docs.map(
-      (d) => ({ id: d.id, ...d.data() } as CardIssue)
-    );
-    callback(issues);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as CardIssue))),
+    (error) => onError?.(error)
+  );
 }
 
 export function subscribeMyCardIssues(
   issuedById: string,
-  callback: (issues: CardIssue[]) => void
+  callback: (issues: CardIssue[]) => void,
+  onError?: (error: Error) => void
 ): () => void {
   const q = query(
     collection(getDb(), "cardIssues"),
     where("issuedById", "==", issuedById),
     orderBy("issuedAt", "desc")
   );
-  return onSnapshot(q, (snapshot) => {
-    const issues = snapshot.docs.map(
-      (d) => ({ id: d.id, ...d.data() } as CardIssue)
-    );
-    callback(issues);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as CardIssue))),
+    (error) => onError?.(error)
+  );
 }
 
 export function subscribeMyCardIssuesByName(
   issuedBy: string,
-  callback: (issues: CardIssue[]) => void
+  callback: (issues: CardIssue[]) => void,
+  onError?: (error: Error) => void
 ): () => void {
   const q = query(
     collection(getDb(), "cardIssues"),
     where("issuedBy", "==", issuedBy),
     orderBy("issuedAt", "desc")
   );
-  return onSnapshot(q, (snapshot) => {
-    const issues = snapshot.docs.map(
-      (d) => ({ id: d.id, ...d.data() } as CardIssue)
-    );
-    callback(issues);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as CardIssue))),
+    (error) => onError?.(error)
+  );
 }
 
 // ─── Stats / Dashboard ────────────────────────────────────────────────
@@ -269,7 +353,8 @@ export function subscribeStats(
     failedTransactions: number;
     collectedCards: number;
     recentActivities: ActivityLog[];
-  }) => void
+  }) => void,
+  onError?: (error: Error) => void
 ): () => void {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -299,7 +384,7 @@ export function subscribeStats(
   );
 
   const unsubs: (() => void)[] = [];
-  let counts = {
+  const counts = {
     totalUsers: 0,
     totalEmployees: 0,
     totalCardsIssued: 0,
@@ -309,56 +394,50 @@ export function subscribeStats(
     recentActivities: [] as ActivityLog[],
   };
   let loaded = 0;
+  let initialLoadDone = false;
   const total = 7;
 
   function emit() {
     loaded++;
-    if (loaded >= total) callback({ ...counts });
+    if (loaded >= total && !initialLoadDone) {
+      initialLoadDone = true;
+      callback({ ...counts });
+    }
   }
 
+  function emitUpdate() {
+    if (initialLoadDone) callback({ ...counts });
+  }
+
+  // A rejected listener still counts as "loaded" so one denied collection does
+  // not stop the other six from ever reporting.
+  const fail = (error: Error) => { onError?.(error); emit(); };
+
   unsubs.push(
-    onSnapshot(usersQ, (s) => {
-      counts.totalUsers = s.size;
-      emit();
-    })
+    onSnapshot(usersQ, (s) => { counts.totalUsers = s.size; if (initialLoadDone) emitUpdate(); else emit(); }, fail)
   );
   unsubs.push(
-    onSnapshot(employeesQ, (s) => {
-      counts.totalEmployees = s.size;
-      emit();
-    })
+    onSnapshot(employeesQ, (s) => { counts.totalEmployees = s.size; if (initialLoadDone) emitUpdate(); else emit(); }, fail)
   );
   unsubs.push(
-    onSnapshot(allIssuesQ, (s) => {
-      counts.totalCardsIssued = s.size;
-      emit();
-    })
+    onSnapshot(allIssuesQ, (s) => { counts.totalCardsIssued = s.size; if (initialLoadDone) emitUpdate(); else emit(); }, fail)
   );
   unsubs.push(
-    onSnapshot(todayIssuesQ, (s) => {
-      counts.todayCardsIssued = s.size;
-      emit();
-    })
+    onSnapshot(todayIssuesQ, (s) => { counts.todayCardsIssued = s.size; if (initialLoadDone) emitUpdate(); else emit(); }, fail)
   );
   unsubs.push(
-    onSnapshot(failedQ, (s) => {
-      counts.failedTransactions = s.size;
-      emit();
-    })
+    onSnapshot(failedQ, (s) => { counts.failedTransactions = s.size; if (initialLoadDone) emitUpdate(); else emit(); }, fail)
   );
   unsubs.push(
-    onSnapshot(collectedQ, (s) => {
-      counts.collectedCards = s.size;
-      emit();
-    })
+    onSnapshot(collectedQ, (s) => { counts.collectedCards = s.size; if (initialLoadDone) emitUpdate(); else emit(); }, fail)
   );
   unsubs.push(
     onSnapshot(activityQ, (s) => {
       counts.recentActivities = s.docs.slice(0, 10).map(
         (d) => ({ id: d.id, ...d.data() } as ActivityLog)
       );
-      emit();
-    })
+      if (initialLoadDone) emitUpdate(); else emit();
+    }, fail)
   );
 
   return () => unsubs.forEach((u) => u());

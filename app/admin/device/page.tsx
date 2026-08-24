@@ -1,16 +1,20 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../../lib/auth-context";
-import { useK750 } from "../../../lib/k750-context";
-import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Nfc } from "lucide-react";
+import { useK750, getK750Conn, getK750Dispense, getK750Collect } from "../../../lib/k750-context";
+import { ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
+import { CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
+import type { LogEntry } from "../../../lib/k750-connection";
+import { subscribeAllCardIssues, logCardIssue, updateCardIssue, logActivity, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
+import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Hand, Terminal, CreditCard, CreditCard as CardIcon } from "lucide-react";
 
-type ToastType = "success" | "error" | "info";
+type ToastType = "success" | "error" | "info" | "warning";
 
 function Toast({ message, type, onClose }: { message: string; type: ToastType; onClose: () => void }) {
-  const icons = { success: <CheckCircle2 className="w-4 h-4 text-green-500" />, error: <XCircle className="w-4 h-4 text-red-500" />, info: <Info className="w-4 h-4 text-blue-500" /> };
-  const bg = { success: "bg-green-50 border-green-200", error: "bg-red-50 border-red-200", info: "bg-blue-50 border-blue-200" };
+  const icons = { success: <CheckCircle2 className="w-4 h-4 text-green-500" />, error: <XCircle className="w-4 h-4 text-red-500" />, info: <Info className="w-4 h-4 text-blue-500" />, warning: <Info className="w-4 h-4 text-amber-500" /> };
+  const bg = { success: "bg-green-50 border-green-200", error: "bg-red-50 border-red-200", info: "bg-blue-50 border-blue-200", warning: "bg-amber-50 border-amber-200" };
   return (
     <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg border px-4 py-3 shadow-lg ${bg[type]}`} style={{ animation: "slideIn 0.3s ease" }}>
       {icons[type]}
@@ -29,7 +33,7 @@ function Badge({ label, color }: { label: string; color: "green" | "yellow" | "r
     gray: "bg-gray-100 text-gray-600 border-gray-200",
   };
   return (
-    <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-mono ${styles[color]}`}>
+    <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[13px] font-mono ${styles[color]}`}>
       {label}
     </span>
   );
@@ -45,20 +49,36 @@ function SensorDot({ label, active }: { label: string; active: boolean }) {
             : "bg-gray-200 border-gray-300"
         }`}
       />
-      <span className="text-[10px] font-mono text-gray-500">{label}</span>
+      <span className="text-[11px] font-mono text-gray-500">{label}</span>
     </div>
   );
 }
 
 export default function DevicePage() {
-  const { profile, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const { service, connState, status, connect, disconnect } = useK750();
+  const { conn, dispense, collect, connState, status, connect, disconnect } = useK750();
   const [firmware, setFirmware] = useState<string | null>(null);
-  const [nfcRead, setNfcRead] = useState<{ uid: string; chipType: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [collectStep, setCollectStep] = useState(0);
+  const [collectStepMsg, setCollectStepMsg] = useState("");
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
+  const [commLog, setCommLog] = useState<LogEntry[]>([]);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  // --- Issue Card state ---
+  const [issueEmpId, setIssueEmpId] = useState("");
+  const [issueEmpName, setIssueEmpName] = useState("");
+  const [issueEmpDept, setIssueEmpDept] = useState("");
+  const [issuing, setIssuing] = useState(false);
+  const [issueStep, setIssueStep] = useState(0);
+  const [issueStepMsg, setIssueStepMsg] = useState("");
+  const [issueResult, setIssueResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [nfcResult, setNfcResult] = useState<{ label: string; value: string } | null>(null);
+
+  // --- Issue Log ---
+  const [issueLog, setIssueLog] = useState<CardIssue[]>([]);
 
   const showToast = (message: string, type: ToastType = "info") => {
     setToast({ message, type });
@@ -68,6 +88,46 @@ export default function DevicePage() {
   useEffect(() => {
     if (!loading && (!profile || profile.role !== "admin")) router.replace("/login");
   }, [profile, loading, router]);
+
+  useEffect(() => {
+    const svc = getK750Conn();
+    const handler = (entry: LogEntry) => {
+      setCommLog((prev) => {
+        const next = [...prev, entry];
+        return next.length > 100 ? next.slice(-100) : next;
+      });
+    };
+    svc.onLog = handler;
+    return () => { svc.onLog = undefined; };
+  }, []);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [commLog]);
+
+  const downloadLog = () => {
+    const lines = commLog.map((e) => {
+      const time = new Date(e.timestamp).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      return `${time} ${e.direction} ${e.hex}${e.text ? " — " + e.text : ""}`;
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `k750-device-log-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Live issue log subscription
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeAllCardIssues(
+      (issues) => setIssueLog(issues.slice(0, 20)),
+      (err) => console.error("Issue log error:", err)
+    );
+    return unsub;
+  }, [user]);
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -82,14 +142,14 @@ export default function DevicePage() {
   };
   const handleRefresh = async () => {
     setActionLoading("refresh");
-    const st = await service?.queryAP();
+    const st = await conn.queryAP();
     setActionLoading(null);
     if (st) showToast("Status refreshed", "success");
     else showToast("No response from device", "error");
   };
   const handleGetVersion = async () => {
     setActionLoading("version");
-    const v = await service?.getVersion();
+    const v = await conn.getVersion();
     setActionLoading(null);
     if (v) { setFirmware(v); showToast(`Firmware: ${v}`, "success"); }
     else showToast("Could not get version", "error");
@@ -97,30 +157,109 @@ export default function DevicePage() {
   const handleReset = async () => {
     setActionLoading("reset");
     showToast("Resetting device...", "info");
-    const ok = await service?.resetDevice();
-    await service?.queryAP();
+    const ok = await conn.resetDevice();
+    await conn.queryAP();
     setActionLoading(null);
     showToast(ok ? "Device reset successful" : "Reset failed", ok ? "success" : "error");
-  };
-  const handleReadNfc = async () => {
-    setActionLoading("nfc");
-    const res = await service?.readNfcCard();
-    setActionLoading(null);
-    if (res?.success && res.uid) {
-      setNfcRead({ uid: res.uid, chipType: res.chipType ?? "?" });
-      showToast(`${res.chipType} card — UID ${res.uid}`, "success");
-    } else {
-      setNfcRead(null);
-      showToast(res?.message ?? "NFC read failed", "error");
-    }
   };
   const handleEject = async () => {
     setActionLoading("eject");
     showToast("Ejecting card...", "info");
-    const ok = await service?.ejectFC0();
-    await service?.queryAP();
+
+    // Attempt 1: Direct DC eject
+    let ejected = await conn.ejectDC();
+    if (ejected) {
+      await conn.queryAP();
+      setActionLoading(null);
+      showToast("Card ejected", "success");
+      return;
+    }
+
+    // Attempt 2: RS reset → retry DC
+    showToast("Eject stuck — resetting device...", "info");
+    await conn.resetDevice();
+    await new Promise((r) => setTimeout(r, 3000));
+    await conn.queryAP();
+
+    showToast("Retrying eject...", "info");
+    ejected = await conn.ejectDC();
+    await conn.queryAP();
     setActionLoading(null);
-    showToast(ok ? "Card ejected" : "Eject failed or timed out", ok ? "success" : "error");
+    showToast(ejected ? "Card ejected after reset" : "Eject failed — card may be jammed. Remove manually.", ejected ? "success" : "error");
+  };
+  const handleCollectCard = async () => {
+    if (actionLoading === "collect") return;
+    setActionLoading("collect");
+    setCollectStep(0);
+    setCollectStepMsg("");
+    try {
+      const res = await collect.visitorCheckout((step, _total, msg) => { setCollectStep(step); setCollectStepMsg(msg); });
+      if (res?.success) {
+        showToast(res.message, "success");
+        if (res.warning) showToast(res.warning, "warning");
+      } else {
+        showToast(res?.message || "Collect failed", "error");
+      }
+    } catch { showToast("Collect error", "error"); }
+    setActionLoading(null);
+    setCollectStep(0);
+    setCollectStepMsg("");
+  };
+
+  const handleIssueCard = async () => {
+    if (!issueEmpId.trim() || !issueEmpName.trim() || !issueEmpDept.trim()) {
+      showToast("Fill in all fields", "error");
+      return;
+    }
+    if (connState !== "connected") { showToast("Connect to device first", "error"); return; }
+    setIssuing(true);
+    setIssueResult(null);
+    setIssueStep(0);
+    setIssueStepMsg("");
+
+    let cardIssueId: string | null = null;
+    try {
+      cardIssueId = await logCardIssue({
+        employeeId: issueEmpId.trim(),
+        employeeName: issueEmpName.trim(),
+        department: issueEmpDept.trim(),
+        issuedBy: profile?.displayName || profile?.email || "Admin",
+        issuedById: user?.uid ?? "",
+        status: "Processing",
+        source: "K750",
+      });
+    } catch { /* */ }
+
+    try {
+      const res = await dispense.issueCard(
+        issueEmpId.trim(),
+        issueEmpName.trim(),
+        issueEmpDept.trim(),
+        (step, _total, msg) => { setIssueStep(step); setIssueStepMsg(msg); }
+      );
+      if (res) {
+        setIssueResult({ success: res.success, message: res.message });
+        if (cardIssueId) {
+          await updateCardIssue(cardIssueId, {
+            status: res.success ? "Issued" : "Failed",
+            ...(res.success ? {} : { errorMessage: res.message }),
+          }).catch(() => {});
+        }
+        if (res.success) {
+          await logActivity({ userId: user?.uid ?? "", userName: profile?.displayName || "Admin", action: "Card Issued", details: `${issueEmpName.trim()} - ${issueEmpDept.trim()} - Success` });
+        }
+        showToast(res.success ? "Card issued!" : res.message, res.success ? "success" : "error");
+        if (res.success) {
+          setTimeout(() => { setIssueEmpId(""); setIssueEmpName(""); setIssueEmpDept(""); setIssueResult(null); }, 3000);
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setIssueResult({ success: false, message: `Error: ${msg}` });
+      showToast(`Error: ${msg}`, "error");
+      if (cardIssueId) await updateCardIssue(cardIssueId, { status: "Failed", errorMessage: msg }).catch(() => {});
+    }
+    setIssuing(false);
   };
   if (loading || !profile) {
     return (
@@ -156,7 +295,7 @@ export default function DevicePage() {
       : "Disconnected";
 
   return (
-    <div style={{ backgroundColor: "#f8fafc", minHeight: "100vh" }} className="p-6">
+    <div style={{ backgroundColor: "#f8fafc", minHeight: "100vh" }} className="p-4 md:p-6">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <div style={{ maxWidth: 1120, margin: "0 auto" }} className="space-y-6">
 
@@ -171,7 +310,7 @@ export default function DevicePage() {
             />
             <div>
               <div className="flex items-center gap-3">
-                <h1 style={{ fontSize: 24, fontWeight: 700, color: "#0f172a" }}>
+                <h1 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a" }}>
                   Device Status
                 </h1>
                 <span
@@ -185,7 +324,7 @@ export default function DevicePage() {
                   K750-001
                 </span>
               </div>
-              <p style={{ fontSize: 13, color: "#64748b", marginTop: 2 }}>
+              <p style={{ fontSize: 14, color: "#64748b", marginTop: 2 }}>
                 Real-time status and controls
               </p>
             </div>
@@ -336,7 +475,39 @@ export default function DevicePage() {
                 >
                   Reset
                 </button>
+                <button
+                  onClick={handleCollectCard}
+                  disabled={connState !== "connected" || actionLoading === "collect"}
+                  style={{
+                    backgroundColor: "#f1f5f9",
+                    border: "1px solid #cbd5e1",
+                    color: "#475569",
+                    borderRadius: 8,
+                    padding: "8px 16px",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    opacity: connState !== "connected" ? 0.4 : 1,
+                  }}
+                  className="hover:bg-gray-200 transition-colors disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {actionLoading === "collect" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Hand className="w-3.5 h-3.5" />}
+                  {actionLoading === "collect" ? "Collecting..." : "Collect Card"}
+                </button>
               </div>
+
+              {actionLoading === "collect" && (
+                <div style={{ marginTop: 8 }}>
+                  <div className="flex items-center gap-2" style={{ fontSize: 11, color: "#64748b" }}>
+                    <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{collectStep}/{CHECKOUT_STEP_LABELS.length}</span>
+                    <span>{collectStepMsg}</span>
+                  </div>
+                  <div className="flex gap-1" style={{ marginTop: 6 }}>
+                    {CHECKOUT_STEP_LABELS.map((label, i) => (
+                      <div key={label} style={{ height: 4, flex: 1, borderRadius: 2, backgroundColor: i + 1 <= collectStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {firmware && (
                 <div style={{ fontSize: 12, color: "#64748b" }}>
@@ -391,7 +562,7 @@ export default function DevicePage() {
                 <div className="flex justify-between items-center" style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
                   <span style={{ fontSize: 13, color: "#64748b" }}>Protocol</span>
                   <span style={{ fontSize: 13, fontWeight: 500, color: "#0f172a", fontFamily: "monospace" }}>
-                    RS-485
+                    RS-232
                   </span>
                 </div>
               </div>
@@ -468,13 +639,16 @@ export default function DevicePage() {
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {b1 === 0 ? (
                         <Badge label="Idle" color="green" />
+                      ) : b1 & 0x04 ? (
+                        <Badge label="Cannot execute" color="red" />
+                      ) : b1 & 0x02 ? (
+                        <Badge label="Prep failed" color="red" />
+                      ) : b1 & 0x08 ? (
+                        <Badge label="Recycle full" color="yellow" />
+                      ) : b1 & 0x01 ? (
+                        <Badge label="Hopper pre-full" color="yellow" />
                       ) : (
-                        <>
-                          {b1 & 0x08 && <Badge label="Recycle full" color="yellow" />}
-                          {b1 & 0x04 && <Badge label="Cannot execute" color="red" />}
-                          {b1 & 0x02 && <Badge label="Prep failed" color="red" />}
-                          {b1 & 0x01 && <Badge label="Hopper pre-full" color="yellow" />}
-                        </>
+                        <Badge label="Idle" color="green" />
                       )}
                     </div>
                   </div>
@@ -493,13 +667,16 @@ export default function DevicePage() {
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {b2 === 0 ? (
                         <Badge label="Idle" color="green" />
+                      ) : b2 & 0x02 ? (
+                        <Badge label="Issue error" color="red" />
+                      ) : b2 & 0x01 ? (
+                        <Badge label="Collect error" color="red" />
+                      ) : b2 & 0x04 ? (
+                        <Badge label="Collecting" color="yellow" />
+                      ) : b2 & 0x08 ? (
+                        <Badge label="Sending" color="yellow" />
                       ) : (
-                        <>
-                          {b2 & 0x08 && <Badge label="Sending" color="yellow" />}
-                          {b2 & 0x04 && <Badge label="Collecting" color="yellow" />}
-                          {b2 & 0x02 && <Badge label="Issue error" color="red" />}
-                          {b2 & 0x01 && <Badge label="Collect error" color="red" />}
-                        </>
+                        <Badge label="Idle" color="green" />
                       )}
                     </div>
                   </div>
@@ -518,13 +695,16 @@ export default function DevicePage() {
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {b3 === 0 ? (
                         <Badge label="OK" color="green" />
+                      ) : b3 & 0x04 ? (
+                        <Badge label="Overlap" color="red" />
+                      ) : b3 & 0x02 ? (
+                        <Badge label="Jam" color="red" />
+                      ) : b3 & 0x08 ? (
+                        <Badge label="Full" color="green" />
+                      ) : b3 & 0x01 ? (
+                        <Badge label="Pre-empty" color="yellow" />
                       ) : (
-                        <>
-                          {b3 & 0x08 && <Badge label="Full" color="green" />}
-                          {b3 & 0x04 && <Badge label="Overlap" color="red" />}
-                          {b3 & 0x02 && <Badge label="Jam" color="red" />}
-                          {b3 & 0x01 && <Badge label="Pre-empty" color="yellow" />}
-                        </>
+                        <Badge label="OK" color="green" />
                       )}
                     </div>
                   </div>
@@ -657,41 +837,16 @@ export default function DevicePage() {
         </div>
 
         {/* Bottom Action Buttons */}
-        <div
-          className="flex flex-wrap gap-3"
-          style={{
-            backgroundColor: "#ffffff",
-            border: "1px solid #e2e8f0",
-            borderRadius: 8,
-            padding: 16,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          }}
-        >
-          <button
-            onClick={handleReadNfc}
-            disabled={connState !== "connected" || actionLoading === "nfc"}
+          <div
+            className="flex flex-col sm:flex-row sm:flex-wrap gap-3"
             style={{
-              backgroundColor: actionLoading === "nfc" ? "#818cf8" : "#6366f1",
-              color: "#ffffff",
+              backgroundColor: "#ffffff",
+              border: "1px solid #e2e8f0",
               borderRadius: 8,
-              padding: "10px 20px",
-              fontSize: 13,
-              fontWeight: 600,
-              opacity: connState !== "connected" ? 0.5 : 1,
+              padding: 16,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
             }}
-            className="hover:opacity-90 transition-opacity flex items-center gap-2 disabled:cursor-not-allowed"
           >
-            {actionLoading === "nfc" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Nfc className="w-4 h-4" />}
-            {actionLoading === "nfc" ? "Reading..." : "Read NFC"}
-          </button>
-          {nfcRead && (
-            <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500">
-                {nfcRead.chipType}
-              </span>
-              <span className="font-mono text-xs text-indigo-900 break-all">{nfcRead.uid}</span>
-            </div>
-          )}
           <button
             onClick={handleEject}
             disabled={connState !== "connected" || actionLoading === "eject"}
@@ -762,6 +917,681 @@ export default function DevicePage() {
             {actionLoading === "reset" && <Loader2 className="w-4 h-4 animate-spin text-red-500" />}
             {actionLoading === "reset" ? "Resetting..." : "Reset Device"}
           </button>
+          <button
+            onClick={handleCollectCard}
+            disabled={connState !== "connected" || actionLoading === "collect"}
+            style={{
+              backgroundColor: actionLoading === "collect" ? "#f59e0b" : "#d97706",
+              color: "#ffffff",
+              borderRadius: 8,
+              padding: "10px 20px",
+              fontSize: 13,
+              fontWeight: 600,
+              opacity: connState !== "connected" ? 0.5 : 1,
+            }}
+            className="hover:opacity-90 transition-opacity flex items-center gap-2 disabled:cursor-not-allowed"
+          >
+            {actionLoading === "collect" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Hand className="w-4 h-4" />}
+            {actionLoading === "collect" ? "Collecting..." : "Collect Card"}
+          </button>
+        </div>
+
+        {actionLoading === "collect" && (
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              border: "1px solid #e2e8f0",
+              borderRadius: 8,
+              padding: 16,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            }}
+          >
+            <div className="flex items-center gap-2" style={{ fontSize: 12, color: "#64748b" }}>
+              <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{collectStep}/{CHECKOUT_STEP_LABELS.length}</span>
+              <span>{collectStepMsg}</span>
+            </div>
+            <div className="flex gap-1.5" style={{ marginTop: 8 }}>
+              {CHECKOUT_STEP_LABELS.map((label, i) => (
+                <div key={label} style={{ height: 5, flex: 1, borderRadius: 3, backgroundColor: i + 1 <= collectStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
+              ))}
+            </div>
+            <div className="flex justify-between" style={{ marginTop: 6 }}>
+              {CHECKOUT_STEP_LABELS.map((label, idx) => (
+                <span key={label} style={{ fontSize: 9, color: idx + 1 <= collectStep ? "#2563eb" : "#94a3b8", fontWeight: idx + 1 === collectStep ? 600 : 400 }}>{label}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===== ISSUE CARD ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            padding: 20,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <div className="flex items-center gap-2" style={{ marginBottom: 16 }}>
+            <CreditCard className="w-4 h-4" style={{ color: "#2563eb" }} />
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+              Issue Card
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" style={{ marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>Employee ID</label>
+              <input
+                value={issueEmpId}
+                onChange={(e) => setIssueEmpId(e.target.value)}
+                placeholder="e.g. EMP001"
+                disabled={issuing}
+                style={{
+                  width: "100%", padding: "8px 12px", fontSize: 13, borderRadius: 6,
+                  border: "1px solid #cbd5e1", outline: "none", fontFamily: "monospace",
+                }}
+                onFocus={(e) => e.target.style.borderColor = "#2563eb"}
+                onBlur={(e) => e.target.style.borderColor = "#cbd5e1"}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>Name</label>
+              <input
+                value={issueEmpName}
+                onChange={(e) => setIssueEmpName(e.target.value)}
+                placeholder="e.g. John"
+                disabled={issuing}
+                style={{
+                  width: "100%", padding: "8px 12px", fontSize: 13, borderRadius: 6,
+                  border: "1px solid #cbd5e1", outline: "none",
+                }}
+                onFocus={(e) => e.target.style.borderColor = "#2563eb"}
+                onBlur={(e) => e.target.style.borderColor = "#cbd5e1"}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>Department</label>
+              <input
+                value={issueEmpDept}
+                onChange={(e) => setIssueEmpDept(e.target.value)}
+                placeholder="e.g. IT"
+                disabled={issuing}
+                style={{
+                  width: "100%", padding: "8px 12px", fontSize: 13, borderRadius: 6,
+                  border: "1px solid #cbd5e1", outline: "none",
+                }}
+                onFocus={(e) => e.target.style.borderColor = "#2563eb"}
+                onBlur={(e) => e.target.style.borderColor = "#cbd5e1"}
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleIssueCard}
+            disabled={connState !== "connected" || issuing || !issueEmpId.trim() || !issueEmpName.trim() || !issueEmpDept.trim()}
+            style={{
+              backgroundColor: issuing ? "#3b82f6" : "#2563eb",
+              color: "#ffffff",
+              borderRadius: 8,
+              padding: "10px 20px",
+              fontSize: 13,
+              fontWeight: 600,
+              opacity: connState !== "connected" || !issueEmpId.trim() || !issueEmpName.trim() || !issueEmpDept.trim() ? 0.5 : 1,
+            }}
+            className="hover:opacity-90 transition-opacity flex items-center gap-2 disabled:cursor-not-allowed"
+          >
+            {issuing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+            {issuing ? "Issuing..." : "Issue Card"}
+          </button>
+
+          {issuing && (
+            <div style={{ marginTop: 12 }}>
+              <div className="flex items-center gap-2" style={{ fontSize: 11, color: "#64748b" }}>
+                <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{issueStep}/{ISSUE_STEP_LABELS.length}</span>
+                <span>{issueStepMsg}</span>
+              </div>
+              <div className="flex gap-1" style={{ marginTop: 6 }}>
+                {ISSUE_STEP_LABELS.map((label, i) => (
+                  <div key={label} style={{ height: 4, flex: 1, borderRadius: 2, backgroundColor: i + 1 <= issueStep ? "#2563eb" : "#e2e8f0", transition: "background-color 0.3s" }} />
+                ))}
+              </div>
+              <div className="flex justify-between" style={{ marginTop: 4 }}>
+                {ISSUE_STEP_LABELS.map((label, idx) => (
+                  <span key={label} style={{ fontSize: 9, color: idx + 1 <= issueStep ? "#2563eb" : "#94a3b8", fontWeight: idx + 1 === issueStep ? 600 : 400 }}>{label}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {issueResult && (
+            <div style={{
+              marginTop: 12, padding: "10px 14px", borderRadius: 8, fontSize: 13, fontWeight: 500,
+              backgroundColor: issueResult.success ? "#f0fdf4" : "#fef2f2",
+              border: `1px solid ${issueResult.success ? "#bbf7d0" : "#fecaca"}`,
+              color: issueResult.success ? "#166534" : "#991b1b",
+            }}>
+              {issueResult.message}
+            </div>
+          )}
+        </div>
+
+        {/* ===== ISSUE LOG ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <div className="flex items-center justify-between" style={{ padding: "12px 16px", borderBottom: "1px solid #e2e8f0" }}>
+            <div className="flex items-center gap-2">
+              <CardIcon className="w-4 h-4" style={{ color: "#64748b" }} />
+              <h2 style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>
+                Issue Log
+              </h2>
+              <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace" }}>
+                ({issueLog.length})
+              </span>
+            </div>
+          </div>
+          <div style={{ maxHeight: 300, overflowY: "auto" }}>
+            {issueLog.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", fontSize: 13, color: "#94a3b8" }}>
+                No card issues yet
+              </div>
+            ) : (
+              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #e2e8f0", backgroundColor: "#f8fafc" }}>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Time</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Employee</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Department</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Issued By</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: 11 }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {issueLog.map((card) => (
+                    <tr key={card.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#64748b", fontSize: 11 }}>{formatDateTime(card.issuedAt)}</td>
+                      <td style={{ padding: "8px 12px", fontWeight: 500, color: "#0f172a" }}>{card.employeeName}</td>
+                      <td style={{ padding: "8px 12px", color: "#475569" }}>{card.department}</td>
+                      <td style={{ padding: "8px 12px", color: "#64748b" }}>{card.issuedBy}</td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <span style={{
+                          display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+                          backgroundColor: card.status === "Issued" ? "#dcfce7" : card.status === "Collected" ? "#dbeafe" : card.status === "Processing" ? "#fef3c7" : "#fee2e2",
+                          color: card.status === "Issued" ? "#166534" : card.status === "Collected" ? "#1e40af" : card.status === "Processing" ? "#92400e" : "#991b1b",
+                        }}>
+                          {card.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* ===== MACHINE COMMANDS (TESTING) ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            padding: 20,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <h2 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 16 }}>
+            Machine Commands (Testing)
+          </h2>
+
+          {/* Full Status Display */}
+          {s && (
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Full Status (AP Response)
+              </h3>
+              <div style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* Byte 1 — Machine Status */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>
+                      Byte 1 — Machine
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                      0x{s.raw.byte1.toString(16).padStart(2, "0").toUpperCase()}
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {[
+                        { bit: 0x08, label: "Recycle full" },
+                        { bit: 0x04, label: "Cannot execute" },
+                        { bit: 0x02, label: "Prep failed" },
+                        { bit: 0x01, label: "Hopper pre-full" },
+                      ].map(({ bit, label }) => (
+                        <div key={bit} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: (s.raw.byte1 & bit) ? "#ef4444" : "#e2e8f0" }} />
+                          <span style={{ fontFamily: "monospace", color: (s.raw.byte1 & bit) ? "#ef4444" : "#94a3b8" }}>
+                            {bit.toString(2).padStart(4, "0")}
+                          </span>
+                          <span style={{ color: "#64748b" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Byte 2 — Action Status */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>
+                      Byte 2 — Action
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                      0x{s.raw.byte2.toString(16).padStart(2, "0").toUpperCase()}
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {[
+                        { bit: 0x08, label: "Sending" },
+                        { bit: 0x04, label: "Collecting" },
+                        { bit: 0x02, label: "Issue error" },
+                        { bit: 0x01, label: "Collect error" },
+                      ].map(({ bit, label }) => (
+                        <div key={bit} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: (s.raw.byte2 & bit) ? "#ef4444" : "#e2e8f0" }} />
+                          <span style={{ fontFamily: "monospace", color: (s.raw.byte2 & bit) ? "#ef4444" : "#94a3b8" }}>
+                            {bit.toString(2).padStart(4, "0")}
+                          </span>
+                          <span style={{ color: "#64748b" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Byte 3 — Card Box */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>
+                      Byte 3 — Card Box
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                      0x{s.raw.byte3.toString(16).padStart(2, "0").toUpperCase()}
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {[
+                        { bit: 0x08, label: "Full (K750)" },
+                        { bit: 0x04, label: "Overlap" },
+                        { bit: 0x02, label: "Jam" },
+                        { bit: 0x01, label: "Pre-empty" },
+                      ].map(({ bit, label }) => (
+                        <div key={bit} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: (s.raw.byte3 & bit) ? "#ef4444" : "#e2e8f0" }} />
+                          <span style={{ fontFamily: "monospace", color: (s.raw.byte3 & bit) ? "#ef4444" : "#94a3b8" }}>
+                            {bit.toString(2).padStart(4, "0")}
+                          </span>
+                          <span style={{ color: "#64748b" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Byte 4 — Channel/Sensors */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>
+                      Byte 4 — Channel
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                      0x{s.raw.byte4.toString(16).padStart(2, "0").toUpperCase()}
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                      {[
+                        { bit: 0x08, label: "Empty" },
+                        { bit: 0x04, label: "S3 (Reader)" },
+                        { bit: 0x02, label: "S2 (Middle)" },
+                        { bit: 0x01, label: "S1 (Front)" },
+                      ].map(({ bit, label }) => (
+                        <div key={bit} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: (s.raw.byte4 & bit) ? "#22c55e" : "#e2e8f0" }} />
+                          <span style={{ fontFamily: "monospace", color: (s.raw.byte4 & bit) ? "#22c55e" : "#94a3b8" }}>
+                            {bit.toString(2).padStart(4, "0")}
+                          </span>
+                          <span style={{ color: "#64748b" }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Command Buttons Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {/* Card Movement */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Card Movement
+              </h3>
+              <div className="flex flex-col gap-2">
+                {[
+                  { label: "FC0 — Eject card", cmd: "fc0", color: "#f97316" },
+                  { label: "FC7 — Move to reader", cmd: "fc7", color: "#2563eb" },
+                  { label: "FC6 — Move to sensor 2", cmd: "fc6", color: "#2563eb" },
+                  { label: "FC4 — Move to hold position", cmd: "fc4", color: "#2563eb" },
+                  { label: "FC8 — Enter from front", cmd: "fc8", color: "#2563eb" },
+                  { label: "CP — Recycle to box", cmd: "cp", color: "#8b5cf6" },
+                  { label: "DB — Return to issuing box", cmd: "db", color: "#8b5cf6" },
+                ].map(({ label, cmd, color }) => (
+                  <button
+                    key={cmd}
+                    onClick={async () => {
+                      setActionLoading(cmd);
+                      let ok = false;
+                      switch (cmd) {
+                        case "fc7": ok = !!(await conn.dispenseFC7()); break;
+                        case "fc6": ok = !!(await conn.moveFC6()); break;
+                        case "fc4": ok = !!(await conn.moveFC4()); break;
+                        case "fc0": ok = !!(await conn.ejectFC0()); break;
+                        case "fc8": ok = !!(await conn.enterFC8()); break;
+                        case "cp": ok = !!(await conn.recycleCP()); break;
+                        case "db": ok = !!(await conn.returnDB()); break;
+                      }
+                      await conn.queryAP();
+                      setActionLoading(null);
+                      showToast(ok ? `${label.split("—")[0].trim()} OK` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color,
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: `1px solid ${color}30`,
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === cmd ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reset / FD Commands */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Reset &amp; FD Commands
+              </h3>
+              <div className="flex flex-col gap-2">
+                {[
+                  { label: "RS — Reset device", cmd: "rs", color: "#dc2626" },
+                  { label: "FD0 — Auto-sense enable", cmd: "fd0", color: "#059669" },
+                  { label: "FD1 — Manual entry mode", cmd: "fd1", color: "#059669" },
+                  { label: "FD2 — Reset, no action", cmd: "fd2", color: "#dc2626" },
+                  { label: "FD3 — Reset → issuing box", cmd: "fd3", color: "#dc2626" },
+                  { label: "FD4 — Reset → recycle box", cmd: "fd4", color: "#dc2626" },
+                ].map(({ label, cmd, color }) => (
+                  <button
+                    key={cmd}
+                    onClick={async () => {
+                      setActionLoading(cmd);
+                      let ok = false;
+                      switch (cmd) {
+                        case "rs": ok = !!(await conn.resetDevice()); break;
+                        case "fd0": ok = !!(await conn.enableFrontAutoSense()); break;
+                        case "fd1": ok = !!(await conn.disableFrontAutoSense()); break;
+                        case "fd2": ok = !!(await conn.resetFD2()); break;
+                        case "fd3": ok = !!(await conn.resetFD3()); break;
+                        case "fd4": ok = !!(await conn.resetFD4()); break;
+                      }
+                      await conn.queryAP();
+                      setActionLoading(null);
+                      showToast(ok ? `${label.split("—")[0].trim()} OK` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color,
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: `1px solid ${color}30`,
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === cmd ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Query & Utility */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Query &amp; Utility
+              </h3>
+              <div className="flex flex-col gap-2">
+                {[
+                  { label: "AP — Query status", cmd: "ap", color: "#2563eb" },
+                  { label: "FC1 — Card position", cmd: "fc1", color: "#2563eb" },
+                  { label: "FR — Device settings", cmd: "fr", color: "#2563eb" },
+                  { label: "GV — Get version", cmd: "gv", color: "#2563eb" },
+                  { label: "BE — Buffer enable", cmd: "be", color: "#059669" },
+                  { label: "BD — Buffer disable", cmd: "bd", color: "#059669" },
+                ].map(({ label, cmd, color }) => (
+                  <button
+                    key={cmd}
+                    onClick={async () => {
+                      setActionLoading(cmd);
+                      let ok = false;
+                      let extra = "";
+                      switch (cmd) {
+                        case "ap": { const st = await conn.queryAP(); ok = !!st; extra = st ? `b1=0x${st.raw.byte1.toString(16).padStart(2,"0")} b2=0x${st.raw.byte2.toString(16).padStart(2,"0")} b3=0x${st.raw.byte3.toString(16).padStart(2,"0")} b4=0x${st.raw.byte4.toString(16).padStart(2,"0")}` : ""; break; }
+                        case "fc1": {
+                          const p = await conn.queryPosition();
+                          ok = !!p;
+                          extra = p ? `card=${p.transport} device=${p.device} box=${p.cardBox} retain=${p.retainBox}` : "not supported by this firmware";
+                          break;
+                        }
+                        case "fr": {
+                          const s2 = await conn.getDeviceSettings();
+                          ok = !!s2;
+                          extra = s2 ? `${s2.frontEntry}; ${s2.resetAction}` : "";
+                          break;
+                        }
+                        case "gv": { const v = await conn.getVersion(); ok = !!v; extra = v || ""; break; }
+                        case "be": ok = !!(await conn.bufferEnable()); break;
+                        case "bd": ok = !!(await conn.bufferDisable()); break;
+                      }
+                      setActionLoading(null);
+                      showToast(ok ? `${label.split("—")[0].trim()} OK${extra ? ": " + extra : ""}` : `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color,
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: `1px solid ${color}30`,
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === cmd ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Contactless (NFC) */}
+            <div>
+              <h3 style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Contactless (NFC)
+              </h3>
+              <div className="flex flex-col gap-2">
+                {[
+                  { label: "UID — Read card serial", cmd: "nfcuid", color: "#6366f1" },
+                  { label: "S50 — Read block 4", cmd: "nfcs50", color: "#6366f1" },
+                  { label: "UL — Read page 4", cmd: "nfcul", color: "#6366f1" },
+                ].map(({ label, cmd, color }) => (
+                  <button
+                    key={cmd}
+                    onClick={async () => {
+                      setActionLoading(cmd);
+                      let ok = false;
+                      let extra = "";
+                      switch (cmd) {
+                        case "nfcuid": {
+                          const r = await conn.readNfcCard();
+                          ok = r.success;
+                          extra = r.success ? `${r.chipType} ${r.uid}` : r.message;
+                          setNfcResult(ok ? { label: `${r.chipType} UID`, value: r.uid ?? "" } : null);
+                          break;
+                        }
+                        case "nfcs50": {
+                          const r = await conn.readNfcBlock("S50", 4);
+                          ok = r.success;
+                          extra = r.success ? (r.hex ?? "") : r.message;
+                          setNfcResult(ok ? { label: "S50 block 4", value: r.hex ?? "" } : null);
+                          break;
+                        }
+                        case "nfcul": {
+                          const r = await conn.readNfcBlock("UL", 4);
+                          ok = r.success;
+                          extra = r.success ? (r.hex ?? "") : r.message;
+                          setNfcResult(ok ? { label: "UL page 4", value: r.hex ?? "" } : null);
+                          break;
+                        }
+                      }
+                      setActionLoading(null);
+                      showToast(ok ? `${label.split("—")[0].trim()} OK${extra ? ": " + extra : ""}` : extra || `${label.split("—")[0].trim()} failed`, ok ? "success" : "error");
+                    }}
+                    disabled={connState !== "connected" || actionLoading !== null}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      color,
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: `1px solid ${color}30`,
+                      opacity: connState !== "connected" ? 0.4 : 1,
+                      textAlign: "left",
+                    }}
+                    className="hover:opacity-80 transition-opacity disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {actionLoading === cmd ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {label}
+                  </button>
+                ))}
+                {nfcResult && (
+                  <div style={{ marginTop: 4, borderRadius: 6, border: "1px solid #6366f130", backgroundColor: "#eef2ff", padding: "6px 10px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      {nfcResult.label}
+                    </div>
+                    <div style={{ fontFamily: "monospace", fontSize: 12, color: "#1e1b4b", wordBreak: "break-all" }}>
+                      {nfcResult.value}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ===== COMMUNICATION LOG ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <div className="flex items-center justify-between" style={{ padding: "12px 16px", borderBottom: "1px solid #e2e8f0" }}>
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4" style={{ color: "#64748b" }} />
+              <h2 style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>
+                Communication Log
+              </h2>
+              <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace" }}>
+                ({commLog.length})
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={downloadLog}
+                disabled={commLog.length === 0}
+                style={{
+                  fontSize: 11,
+                  color: commLog.length === 0 ? "#cbd5e1" : "#2563eb",
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                  border: "1px solid #e2e8f0",
+                }}
+                className="hover:bg-gray-50 transition-colors"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => setCommLog([])}
+                style={{
+                  fontSize: 11,
+                  color: "#64748b",
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                  border: "1px solid #e2e8f0",
+                }}
+                className="hover:bg-gray-50 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div
+            style={{
+              maxHeight: 300,
+              overflowY: "auto",
+              backgroundColor: "#1e293b",
+              borderRadius: "0 0 8px 8px",
+              padding: "8px 12px",
+              fontFamily: "monospace",
+              fontSize: 11,
+              lineHeight: "18px",
+            }}
+          >
+            {commLog.length === 0 && (
+              <div style={{ color: "#64748b", fontStyle: "italic" }}>No communication yet. Connect device and send commands.</div>
+            )}
+            {commLog.map((entry, i) => {
+              const time = new Date(entry.timestamp).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+              const isTX = entry.direction === "TX";
+              const isRX = entry.direction === "RX";
+              const color = isTX ? "#60a5fa" : isRX ? "#4ade80" : "#fbbf24";
+              return (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <span style={{ color: "#64748b", flexShrink: 0 }}>{time}</span>
+                  <span style={{ color, fontWeight: 600, flexShrink: 0, width: 20 }}>{entry.direction}</span>
+                  <span style={{ color: "#e2e8f0", wordBreak: "break-all" }}>
+                    {entry.hex}
+                    {entry.text && <span style={{ color: "#94a3b8" }}> — {entry.text}</span>}
+                  </span>
+                </div>
+              );
+            })}
+            <div ref={logEndRef} />
+          </div>
         </div>
 
       </div>

@@ -34,11 +34,17 @@
 
 * { box-sizing: border-box; }
 
+html {
+  font-size: 15px;
+}
+
 body {
   background: var(--bg-base);
   color: var(--text-primary);
   font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
   min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -73,6 +79,23 @@ body {
 .animate-pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
 .animate-slide-in { animation: slide-in-right 0.3s ease-out; }
 
+/* Font size scale */
+.fs-page-heading { font-size: 28px; }
+.fs-section-heading { font-size: 16px; }
+.fs-page-subtitle { font-size: 14px; }
+.fs-table-header { font-size: 12px; }
+.fs-table-body { font-size: 14px; }
+.fs-form-label { font-size: 12px; }
+.fs-form-input { font-size: 14px; }
+.fs-badge { font-size: 11px; }
+.fs-small { font-size: 11px; }
+.fs-nav-item { font-size: 14px; }
+.fs-button { font-size: 14px; }
+.fs-sidebar-brand { font-size: 14px; }
+.fs-sidebar-section { font-size: 11px; }
+.fs-sidebar-user { font-size: 13px; }
+.fs-kpi-number { font-size: 28px; }
+
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent) !important;
@@ -90,3 +113,61 @@ input:focus, select:focus, textarea:focus {
 
 .table-row { transition: background 0.15s ease; }
 .table-row:hover { background: var(--bg-hover); }
+
+/* Responsive table container */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-responsive table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+}
+
+/* Consistent table styling */
+.app-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.app-table thead th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+  white-space: nowrap;
+}
+
+.app-table tbody td {
+  padding: 14px 16px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.app-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.app-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/* Responsive padding adjustments */
+@media (max-width: 768px) {
+  html { font-size: 14px; }
+  .app-table thead th { padding: 10px 12px; font-size: 11px; }
+  .app-table tbody td { padding: 12px; font-size: 13px; }
+}
+
+@media (min-width: 1920px) {
+  html { font-size: 16px; }
+}

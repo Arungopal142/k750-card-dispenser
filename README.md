@@ -44,19 +44,21 @@ If the browser does not support Web Serial API, a warning banner will be display
 
    A card with no readable chip still issues successfully — the NFC read is
    logged and skipped, not treated as a failure.
-
-Admins can also read the UID of a card already at the reader from
-**Admin → Device → Read NFC**.
 5. **RS** — Reset device if errors occur
+
+Admins can drive the machine by hand — including reading the UID of a card
+already at the reader — from **Admin → Device → Machine Commands**.
 
 ## Project Structure
 
 ```
 types/web-serial.d.ts    — Web Serial API TypeScript declarations
-lib/k750-protocol.ts     — Packet builder, BCC, status decoding
-lib/k750-service.ts      — Serial I/O, device commands, issue flow
-app/page.tsx             — UI (dashboard, form, debug log)
-app/layout.tsx           — Dark theme layout
+lib/k750-protocol.ts     — Packet builder, BCC, status and card-response decoding
+lib/k750-connection.ts   — Serial I/O, device commands, NFC read
+lib/k750-dispense.ts     — Card issue flow
+lib/k750-collect.ts      — Card checkout/collect flow
+app/admin/device/page.tsx — Device status + manual machine commands
+app/layout.tsx           — Layout
 ```
 
 ## Deploy to Vercel

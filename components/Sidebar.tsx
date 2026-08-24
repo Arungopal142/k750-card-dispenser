@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "../lib/auth-context";
+import { useK750 } from "../lib/k750-context";
 import { useSidebar } from "../lib/sidebar-context";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   CreditCard,
@@ -19,6 +20,8 @@ import {
   X,
   ChevronsLeft,
   ChevronsRight,
+  Plus,
+  Minus,
 } from "lucide-react";
 
 type NavItem = {
@@ -36,7 +39,7 @@ const adminSections: NavSection[] = [
   { label: "OVERVIEW", items: [{ href: "/admin", label: "Dashboard", icon: LayoutDashboard }] },
   { label: "CARD OPS", items: [
     { href: "/dashboard/issue", label: "Issue Card", icon: CreditCard },
-    { href: "/admin/cards", label: "My Cards", icon: ClipboardList },
+    { href: "/admin/cards", label: "Card Records", icon: ClipboardList },
   ]},
   { label: "MANAGEMENT", items: [
     { href: "/admin/users", label: "Users", icon: UserCog },
@@ -64,12 +67,35 @@ function isActive(pathname: string, href: string) {
 
 export default function Sidebar() {
   const { profile, logout } = useAuth();
+  const { connState } = useK750();
   const pathname = usePathname();
   const router = useRouter();
   const { collapsed, toggle } = useSidebar();
   const [open, setOpen] = useState(false);
   const isAdmin = profile?.role === "admin";
   const sections = isAdmin ? adminSections : userSections;
+  const isOnline = connState === "connected";
+
+  const FONT_SIZES = [12, 13, 14, 15, 16] as const;
+  const [fontSize, setFontSize] = useState(14);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("app-font-size");
+    if (saved) {
+      setFontSize(Number(saved));
+      document.documentElement.style.fontSize = `${saved}px`;
+    }
+  }, []);
+
+  const changeFontSize = (delta: number) => {
+    setFontSize((prev) => {
+      const idx = FONT_SIZES.indexOf(prev as typeof FONT_SIZES[number]);
+      const next = FONT_SIZES[Math.max(0, Math.min(FONT_SIZES.length - 1, idx + delta))];
+      localStorage.setItem("app-font-size", String(next));
+      document.documentElement.style.fontSize = `${next}px`;
+      return next;
+    });
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -77,8 +103,8 @@ export default function Sidebar() {
   };
 
   const navItemClass = (active: boolean, collapsedMode: boolean) =>
-    `flex items-center gap-3 rounded-md text-[13px] font-medium transition-all ${
-      collapsedMode ? "justify-center px-2 py-2.5" : "px-3 py-2"
+    `flex items-center gap-3 rounded-md text-[14px] font-medium transition-all ${
+      collapsedMode ? "justify-center px-2 py-2.5" : "px-3 py-2.5"
     } ${
       active
         ? "bg-blue-50 text-blue-600 border-l-2 border-blue-600"
@@ -99,7 +125,7 @@ export default function Sidebar() {
           <div className="flex items-center justify-center" style={{ width: 24, height: 24, borderRadius: 5, background: "#2563eb" }}>
             <CreditCard className="w-3 h-3 text-white" />
           </div>
-          <h1 className="text-sm font-bold" style={{ color: "#0f172a" }}>K750</h1>
+          <h1 className="text-sm font-bold" style={{ color: "#0f172a" }}>VMS CARD DISPENSER</h1>
         </div>
       </div>
 
@@ -119,8 +145,8 @@ export default function Sidebar() {
               <CreditCard className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-[13px] font-bold" style={{ color: "#0f172a" }}>K750</h1>
-              <p className="text-[9px] font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>Card Management</p>
+              <h1 className="text-[13px] font-bold" style={{ color: "#0f172a" }}>VMS CARD DISPENSER</h1>
+              <p className="text-[9px] font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>Management System</p>
             </div>
           </div>
           <button onClick={() => setOpen(false)} className="p-1" style={{ color: "#64748b" }}>
@@ -131,7 +157,7 @@ export default function Sidebar() {
         <nav className="flex-1 p-3 space-y-3 overflow-y-auto">
           {sections.map((section) => (
             <div key={section.label}>
-              <p className="text-[10px] font-medium uppercase tracking-wider px-3 py-2" style={{ color: "#64748b", letterSpacing: "0.08em" }}>{section.label}</p>
+                <p className="text-[11px] font-medium uppercase tracking-wider px-3 py-2" style={{ color: "#64748b", letterSpacing: "0.08em" }}>{section.label}</p>
               <div className="space-y-0.5">
                 {section.items.map((link) => {
                   const active = isActive(pathname, link.href);
@@ -150,18 +176,36 @@ export default function Sidebar() {
 
         <div className="p-3 space-y-2" style={{ borderTop: "1px solid #e2e8f0" }}>
           <div className="flex items-center gap-2 px-3 py-2">
-            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "#16a34a" }} />
+            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: isOnline ? "#16a34a" : "#94a3b8" }} />
             <span className="text-xs font-medium" style={{ color: "#475569" }}>K750-001</span>
-            <span className="text-[10px] font-medium uppercase ml-auto" style={{ color: "#16a34a" }}>ONLINE</span>
+            <span className="text-[10px] font-medium uppercase ml-auto" style={{ color: isOnline ? "#16a34a" : "#94a3b8" }}>{isOnline ? "ONLINE" : "OFFLINE"}</span>
           </div>
-          <div className="flex items-center gap-3 px-2">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0" style={{ background: "#eff6ff", color: "#2563eb" }}>
+          <div className="flex items-center justify-between px-3 py-1.5">
+            <span className="text-[11px] font-medium" style={{ color: "#64748b" }}>Font</span>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => changeFontSize(-1)} disabled={fontSize <= FONT_SIZES[0]}
+                className="w-7 h-7 rounded border flex items-center justify-center transition-all disabled:opacity-30"
+                style={{ borderColor: "#cbd5e1", background: "#fff" }}>
+                <Minus className="w-3 h-3" style={{ color: "#475569" }} />
+              </button>
+              <span className="text-[11px] font-semibold min-w-[18px] text-center" style={{ color: "#0f172a" }}>{fontSize}</span>
+              <button onClick={() => changeFontSize(1)} disabled={fontSize >= FONT_SIZES[FONT_SIZES.length - 1]}
+                className="w-7 h-7 rounded border flex items-center justify-center transition-all disabled:opacity-30"
+                style={{ borderColor: "#cbd5e1", background: "#fff" }}>
+                <Plus className="w-3 h-3" style={{ color: "#475569" }} />
+              </button>
+            </div>
+          </div>
+          <div className={`flex items-center gap-3 ${collapsed ? "justify-center px-1" : "px-2"}`}>
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-medium flex-shrink-0" style={{ background: "#eff6ff", color: "#2563eb" }}>
               {profile?.displayName?.charAt(0)?.toUpperCase()}
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium truncate" style={{ color: "#0f172a" }}>{profile?.displayName}</div>
-              <div className="text-[10px] truncate" style={{ color: "#64748b" }}>{profile?.email}</div>
-            </div>
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-medium truncate" style={{ color: "#0f172a" }}>{profile?.displayName}</div>
+                <div className="text-[11px] truncate" style={{ color: "#64748b" }}>{profile?.email}</div>
+              </div>
+            )}
           </div>
           <button onClick={handleLogout} className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium transition-colors" style={{ color: "#dc2626" }}>
             <LogOut className="w-4 h-4" strokeWidth={1.5} />
@@ -183,8 +227,8 @@ export default function Sidebar() {
             </div>
             {!collapsed && (
               <div className="overflow-hidden">
-                <h1 className="text-[13px] font-bold whitespace-nowrap" style={{ color: "#0f172a" }}>K750</h1>
-                <p className="text-[9px] font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>Card Management</p>
+                <h1 className="text-[13px] font-bold whitespace-nowrap" style={{ color: "#0f172a" }}>VMS CARD DISPENSER</h1>
+                <p className="text-[9px] font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>Management System</p>
               </div>
             )}
           </div>
@@ -205,7 +249,7 @@ export default function Sidebar() {
           {sections.map((section) => (
             <div key={section.label} className="mb-2">
               {!collapsed && (
-                <p className="text-[10px] font-medium uppercase tracking-wider px-4 py-2" style={{ color: "#64748b", letterSpacing: "0.08em" }}>{section.label}</p>
+                <p className="text-[11px] font-medium uppercase tracking-wider px-4 py-2" style={{ color: "#64748b", letterSpacing: "0.08em" }}>{section.label}</p>
               )}
               <div className="space-y-0.5 px-2">
                 {section.items.map((link) => {
@@ -226,26 +270,44 @@ export default function Sidebar() {
         {/* Bottom */}
         <div className={`${collapsed ? "px-2 py-3" : "p-3"} space-y-2`} style={{ borderTop: "1px solid #e2e8f0" }}>
           <div className={`flex items-center gap-2 ${collapsed ? "justify-center px-1" : "px-3"} py-2`}>
-            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "#16a34a" }} />
+            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: isOnline ? "#16a34a" : "#94a3b8" }} />
             {!collapsed && (
               <>
                 <span className="text-xs font-medium" style={{ color: "#475569" }}>K750-001</span>
-                <span className="text-[10px] font-medium uppercase ml-auto" style={{ color: "#16a34a" }}>ONLINE</span>
+                <span className="text-[10px] font-medium uppercase ml-auto" style={{ color: isOnline ? "#16a34a" : "#94a3b8" }}>{isOnline ? "ONLINE" : "OFFLINE"}</span>
               </>
             )}
           </div>
+          {!collapsed && (
+            <div className="flex items-center justify-between px-3 py-1.5">
+              <span className="text-[11px] font-medium" style={{ color: "#64748b" }}>Font</span>
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => changeFontSize(-1)} disabled={fontSize <= FONT_SIZES[0]}
+                  className="w-7 h-7 rounded border flex items-center justify-center transition-all disabled:opacity-30"
+                  style={{ borderColor: "#cbd5e1", background: "#fff" }}>
+                  <Minus className="w-3 h-3" style={{ color: "#475569" }} />
+                </button>
+                <span className="text-[11px] font-semibold min-w-[18px] text-center" style={{ color: "#0f172a" }}>{fontSize}</span>
+                <button onClick={() => changeFontSize(1)} disabled={fontSize >= FONT_SIZES[FONT_SIZES.length - 1]}
+                  className="w-7 h-7 rounded border flex items-center justify-center transition-all disabled:opacity-30"
+                  style={{ borderColor: "#cbd5e1", background: "#fff" }}>
+                  <Plus className="w-3 h-3" style={{ color: "#475569" }} />
+                </button>
+              </div>
+            </div>
+          )}
           <div className={`flex items-center gap-3 ${collapsed ? "justify-center px-1" : "px-2"}`}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0" style={{ background: "#eff6ff", color: "#2563eb" }}>
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-medium flex-shrink-0" style={{ background: "#eff6ff", color: "#2563eb" }}>
               {profile?.displayName?.charAt(0)?.toUpperCase()}
             </div>
             {!collapsed && (
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium truncate" style={{ color: "#0f172a" }}>{profile?.displayName}</div>
-                <div className="text-[10px] truncate" style={{ color: "#64748b" }}>{profile?.email}</div>
+                <div className="text-[13px] font-medium truncate" style={{ color: "#0f172a" }}>{profile?.displayName}</div>
+                <div className="text-[11px] truncate" style={{ color: "#64748b" }}>{profile?.email}</div>
               </div>
             )}
           </div>
-          <button onClick={handleLogout} className={`w-full flex items-center gap-3 rounded-md text-[13px] font-medium transition-colors ${collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2"}`} style={{ color: "#dc2626" }} title={collapsed ? "Logout" : undefined}>
+          <button onClick={handleLogout} className={`w-full flex items-center gap-3 rounded-md text-[14px] font-medium transition-colors ${collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2"}`} style={{ color: "#dc2626" }} title={collapsed ? "Logout" : undefined}>
             <LogOut className="w-4 h-4" strokeWidth={1.5} />
             {!collapsed && <span>Logout</span>}
           </button>

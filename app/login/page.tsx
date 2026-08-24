@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../lib/auth-context";
-import { CreditCard, Mail, Lock, AlertCircle, Loader2, ArrowRight } from "lucide-react";
+import { Mail, Lock, AlertCircle, Loader2, ArrowRight, Eye, EyeOff } from "lucide-react";
 
 export default function UserLoginPage() {
   const { login, register, user, authError } = useAuth();
@@ -12,6 +12,7 @@ export default function UserLoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -70,7 +71,7 @@ export default function UserLoginPage() {
                 color: "#0f172a",
               }}
             >
-              K750 CARD DISPENSER
+              VMS CARD DISPENSER
             </h2>
             <p
               style={{
@@ -110,42 +111,6 @@ export default function UserLoginPage() {
               </div>
               <p style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>K750-001</p>
               <p style={{ fontSize: "11px", color: "#94a3b8" }}>USB Serial Connected</p>
-            </div>
-
-            {/* Card Inventory */}
-            <div
-              style={{
-                backgroundColor: "white",
-                border: "1px solid #e2e8f0",
-                borderRadius: "8px",
-                padding: "16px",
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <span style={{ fontSize: "13px", fontWeight: 600, color: "#0f172a" }}>
-                  Card Inventory
-                </span>
-              </div>
-              <p style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>341 / 450</p>
-              <div
-                style={{
-                  marginTop: "6px",
-                  width: "100%",
-                  height: "6px",
-                  backgroundColor: "#e2e8f0",
-                  borderRadius: "3px",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    width: "75.8%",
-                    height: "100%",
-                    backgroundColor: "#2563eb",
-                    borderRadius: "3px",
-                  }}
-                />
-              </div>
             </div>
 
             {/* System Ready */}
@@ -189,16 +154,16 @@ export default function UserLoginPage() {
             <div>
               <h1
                 style={{
-                  fontSize: "20px",
+                  fontSize: "22px",
                   fontWeight: 700,
                   color: "#0f172a",
                 }}
               >
-                K750 CARD DISPENSER
+                VMS CARD DISPENSER
               </h1>
               <p
                 style={{
-                  fontSize: "12px",
+                  fontSize: "13px",
                   fontWeight: 500,
                   color: "#2563eb",
                   marginTop: "2px",
@@ -207,8 +172,8 @@ export default function UserLoginPage() {
                 Operator Portal
               </p>
               <div style={{ marginTop: "16px" }}>
-                <p style={{ fontSize: "16px", fontWeight: 600, color: "#0f172a" }}>Welcome back</p>
-                <p style={{ fontSize: "13px", color: "#64748b" }}>Sign in to continue</p>
+                <p style={{ fontSize: "18px", fontWeight: 600, color: "#0f172a" }}>Welcome back</p>
+                <p style={{ fontSize: "14px", color: "#64748b" }}>Sign in to continue</p>
               </div>
             </div>
 
@@ -227,7 +192,7 @@ export default function UserLoginPage() {
                   className="flex-shrink-0"
                   style={{ width: "14px", height: "14px", color: "#EF4444" }}
                 />
-                <span style={{ fontSize: "12px", color: "#EF4444" }}>
+                <span style={{ fontSize: "13px", color: "#EF4444" }}>
                   {authError || error}
                 </span>
               </div>
@@ -239,7 +204,7 @@ export default function UserLoginPage() {
                 <div className="space-y-1.5">
                   <label
                     style={{
-                      fontSize: "12px",
+                      fontSize: "13px",
                       fontWeight: 500,
                       color: "#374151",
                     }}
@@ -260,7 +225,7 @@ export default function UserLoginPage() {
                       height: "44px",
                       padding: "0 14px",
                       color: "#0f172a",
-                      fontSize: "14px",
+                      fontSize: "15px",
                       outline: "none",
                       transition: "border-color 0.2s",
                     }}
@@ -274,7 +239,7 @@ export default function UserLoginPage() {
                 <label
                   className="flex items-center gap-1.5"
                   style={{
-                    fontSize: "12px",
+                    fontSize: "13px",
                     fontWeight: 500,
                     color: "#374151",
                   }}
@@ -309,7 +274,7 @@ export default function UserLoginPage() {
                 <label
                   className="flex items-center gap-1.5"
                   style={{
-                    fontSize: "12px",
+                    fontSize: "13px",
                     fontWeight: 500,
                     color: "#374151",
                   }}
@@ -317,28 +282,38 @@ export default function UserLoginPage() {
                   <Lock style={{ width: "13px", height: "13px" }} />
                   Password
                 </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  placeholder="Min 6 characters"
-                  className="w-full"
-                  style={{
-                    backgroundColor: "white",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "6px",
-                    height: "44px",
-                    padding: "0 14px",
-                    color: "#0f172a",
-                    fontSize: "14px",
-                    outline: "none",
-                    transition: "border-color 0.2s",
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = "#2563eb")}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = "#cbd5e1")}
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    placeholder="Min 6 characters"
+                    className="w-full"
+                    style={{
+                      backgroundColor: "white",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "6px",
+                      height: "44px",
+                      padding: "0 40px 0 14px",
+                      color: "#0f172a",
+                      fontSize: "15px",
+                      outline: "none",
+                      transition: "border-color 0.2s",
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = "#2563eb")}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = "#cbd5e1")}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    style={{ color: "#94a3b8", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                  >
+                    {showPassword ? <EyeOff style={{ width: "18px", height: "18px" }} /> : <Eye style={{ width: "18px", height: "18px" }} />}
+                  </button>
+                </div>
               </div>
 
               <button
@@ -349,7 +324,7 @@ export default function UserLoginPage() {
                   backgroundColor: submitting ? "rgba(37,99,235,0.5)" : "#2563eb",
                   color: "white",
                   fontWeight: 600,
-                  fontSize: "14px",
+                  fontSize: "15px",
                   height: "44px",
                   borderRadius: "6px",
                   border: "none",

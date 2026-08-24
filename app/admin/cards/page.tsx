@@ -32,13 +32,15 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span
       style={{ backgroundColor: s.bg, color: s.text }}
-      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold"
+      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
     >
       <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: s.dot }} />
       {s.label}
     </span>
   );
 }
+
+const PAGE_SIZE = 10;
 
 export default function CardsPage() {
   const { user, profile, loading } = useAuth();
@@ -48,6 +50,7 @@ export default function CardsPage() {
   const [search, setSearch] = useState("");
   const [filterDept, setFilterDept] = useState("");
   const [filterDate, setFilterDate] = useState("");
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     if (!loading && (!profile || profile.role !== "admin")) router.replace("/login");
@@ -86,7 +89,16 @@ export default function CardsPage() {
     return matchSearch && matchDept && matchDate;
   });
 
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   const exportCSV = () => {
+    const escapeCSV = (val: string) => {
+      if (val.includes(",") || val.includes('"') || val.includes("\n") || val.includes("\r")) {
+        return `"${val.replace(/"/g, '""')}"`;
+      }
+      return val;
+    };
     const headers = ["Employee ID", "Name", "Department", "Issued By", "Date", "Status", "Checkout Time", "Checked Out By"];
     const rows = filtered.map((c) => [
       c.employeeId,
@@ -98,7 +110,7 @@ export default function CardsPage() {
       formatDateTime(c.checkoutAt),
       c.checkedOutBy || "",
     ]);
-    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const csv = [headers, ...rows].map((r) => r.map(escapeCSV).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -119,13 +131,13 @@ export default function CardsPage() {
     );
 
   return (
-    <div style={{ backgroundColor: COLORS.bg, minHeight: "100vh" }} className="p-6">
+    <div style={{ backgroundColor: COLORS.bg, minHeight: "100vh" }} className="p-4 md:p-6">
       <div className="max-w-[1280px] mx-auto space-y-5">
 
         {/* Header */}
         <div
           style={{ backgroundColor: COLORS.card, borderColor: COLORS.borderSubtle }}
-          className="rounded-[8px] border px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+          className="rounded-[8px] border px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
         >
           <div className="flex items-center gap-3.5">
             <div
@@ -135,10 +147,10 @@ export default function CardsPage() {
               <CreditCard className="w-5 h-5" />
             </div>
             <div>
-              <h1 style={{ color: COLORS.textPrimary }} className="text-[24px] font-bold leading-tight">
+              <h1 style={{ color: COLORS.textPrimary }} className="text-[26px] font-bold leading-tight">
                 Card Issuance
               </h1>
-              <p style={{ color: COLORS.textTertiary }} className="text-sm mt-0.5">
+              <p style={{ color: COLORS.textTertiary }} className="text-[14px] mt-0.5">
                 {filtered.length} records found
               </p>
             </div>
@@ -208,7 +220,7 @@ export default function CardsPage() {
                 borderColor: COLORS.borderDefault,
                 color: COLORS.textPrimary,
               }}
-              className="w-full rounded-[8px] border pl-10 pr-4 py-2.5 text-sm placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors"
+              className="w-full rounded-[8px] border pl-10 pr-4 py-2.5 text-[14px] placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors"
               placeholder="Search by ID or name..."
             />
           </div>
@@ -220,7 +232,7 @@ export default function CardsPage() {
               borderColor: COLORS.borderDefault,
               color: COLORS.textPrimary,
             }}
-            className="rounded-[8px] border px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors"
+            className="rounded-[8px] border px-4 py-2.5 text-[14px] focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors"
           >
             <option value="">All Departments</option>
             {departments.map((d) => (
@@ -238,7 +250,7 @@ export default function CardsPage() {
               borderColor: COLORS.borderDefault,
               color: COLORS.textPrimary,
             }}
-            className="rounded-[8px] border px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors"
+            className="rounded-[8px] border px-4 py-2.5 text-[14px] focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors"
           />
         </div>
 
@@ -248,31 +260,31 @@ export default function CardsPage() {
           className="rounded-[8px] border shadow-sm"
         >
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-[14px]">
               <thead>
                 <tr style={{ backgroundColor: "#f8fafc", borderBottom: `1px solid ${COLORS.borderSubtle}` }}>
-                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3 px-4 font-semibold text-[11px] uppercase tracking-wider">
+                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3.5 px-5 font-semibold text-[12px] uppercase tracking-wider">
                     Employee ID
                   </th>
-                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3 px-4 font-semibold text-[11px] uppercase tracking-wider">
+                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3.5 px-5 font-semibold text-[12px] uppercase tracking-wider">
                     Name
                   </th>
-                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3 px-4 font-semibold text-[11px] uppercase tracking-wider hidden sm:table-cell">
+                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3.5 px-5 font-semibold text-[12px] uppercase tracking-wider hidden sm:table-cell">
                     Department
                   </th>
-                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3 px-4 font-semibold text-[11px] uppercase tracking-wider hidden md:table-cell">
+                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3.5 px-5 font-semibold text-[12px] uppercase tracking-wider hidden md:table-cell">
                     Issued By
                   </th>
-                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3 px-4 font-semibold text-[11px] uppercase tracking-wider">
+                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3.5 px-5 font-semibold text-[12px] uppercase tracking-wider">
                     Date
                   </th>
-                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3 px-4 font-semibold text-[11px] uppercase tracking-wider">
+                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3.5 px-5 font-semibold text-[12px] uppercase tracking-wider">
                     Status
                   </th>
-                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3 px-4 font-semibold text-[11px] uppercase tracking-wider hidden lg:table-cell">
+                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3.5 px-5 font-semibold text-[12px] uppercase tracking-wider hidden lg:table-cell">
                     Checkout
                   </th>
-                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3 px-4 font-semibold text-[11px] uppercase tracking-wider">
+                  <th style={{ color: COLORS.textTertiary }} className="text-left py-3.5 px-5 font-semibold text-[12px] uppercase tracking-wider">
                     Action
                   </th>
                 </tr>
@@ -284,22 +296,22 @@ export default function CardsPage() {
                     style={{ borderBottom: `1px solid ${COLORS.borderSubtle}` }}
                     className="hover:bg-gray-50/60 transition-colors"
                   >
-                    <td className="py-3 px-4 font-mono" style={{ color: COLORS.textPrimary }}>
+                    <td className="py-3.5 px-5 font-mono" style={{ color: COLORS.textPrimary }}>
                       {c.employeeId}
                     </td>
-                    <td className="py-3 px-4 font-medium" style={{ color: COLORS.textPrimary }}>
+                    <td className="py-3.5 px-5 font-medium" style={{ color: COLORS.textPrimary }}>
                       {c.employeeName}
                     </td>
-                    <td className="py-3 px-4 hidden sm:table-cell" style={{ color: COLORS.textSecondary }}>
+                    <td className="py-3.5 px-5 hidden sm:table-cell" style={{ color: COLORS.textSecondary }}>
                       {c.department}
                     </td>
-                    <td className="py-3 px-4 hidden md:table-cell" style={{ color: COLORS.textSecondary }}>
+                    <td className="py-3.5 px-5 hidden md:table-cell" style={{ color: COLORS.textSecondary }}>
                       {c.issuedBy}
                     </td>
-                    <td className="py-3 px-4" style={{ color: COLORS.textTertiary }}>
+                    <td className="py-3.5 px-5" style={{ color: COLORS.textTertiary }}>
                       {formatDateTime(c.issuedAt)}
                     </td>
-                    <td className="py-3 px-4">
+                    <td className="py-3.5 px-5">
                       <StatusBadge status={c.status} />
                     </td>
                     <td className="py-3 px-4 hidden lg:table-cell" style={{ color: COLORS.textTertiary }}>
@@ -307,7 +319,7 @@ export default function CardsPage() {
                         ? `${c.checkedOutBy ?? ""} \u2022 ${formatDateTime(c.checkoutAt)}`
                         : "\u2014"}
                     </td>
-                    <td className="py-3 px-4">
+                    <td className="py-3.5 px-5">
                       <span style={{ color: "#94a3b8" }} className="text-[10px]">—</span>
                     </td>
                   </tr>
@@ -337,11 +349,11 @@ export default function CardsPage() {
               style={{ borderTop: `1px solid ${COLORS.borderSubtle}` }}
               className="px-5 py-3 flex items-center justify-between"
             >
-              <p style={{ color: COLORS.textTertiary }} className="text-xs">
+              <p style={{ color: COLORS.textTertiary }} className="text-[13px]">
                 Showing <span style={{ color: COLORS.textPrimary }} className="font-medium">{filtered.length}</span> of{" "}
                 <span style={{ color: COLORS.textPrimary }} className="font-medium">{cards.length}</span> records
               </p>
-              <p style={{ color: COLORS.textTertiary }} className="text-xs">
+              <p style={{ color: COLORS.textTertiary }} className="text-[13px]">
                 {connState === "connected" ? (
                   <span className="flex items-center gap-1.5">
                     <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: COLORS.success }} />

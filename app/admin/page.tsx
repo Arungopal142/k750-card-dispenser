@@ -3,18 +3,15 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../lib/auth-context";
+import { useK750 } from "../../lib/k750-context";
 import {
-  getStats,
   getAllCardIssues,
-  getEmployees,
   getAllUsers,
   type CardIssue,
   toDate,
 } from "../../lib/firestore-service";
 import {
-  Users,
   CreditCard,
-
   Wifi,
   Activity,
   ArrowRight,
@@ -27,7 +24,9 @@ import {
 
 export default function AdminDashboard() {
   const { profile, loading } = useAuth();
+  const { connState } = useK750();
   const router = useRouter();
+  const isOnline = connState === "connected";
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalEmployees: 0,
@@ -49,10 +48,8 @@ export default function AdminDashboard() {
     if (profile?.role !== "admin") return;
     const fetchStats = async () => {
       try {
-        const [statsData, cards, employees, users] = await Promise.all([
-          getStats(),
+        const [cards, users] = await Promise.all([
           getAllCardIssues(),
-          getEmployees(),
           getAllUsers(),
         ]);
         const totalCards = cards.length;
@@ -67,7 +64,7 @@ export default function AdminDashboard() {
         ).length;
         setStats({
           totalUsers: users.length,
-          totalEmployees: employees.length,
+          totalEmployees: 0,
           totalCardsIssued: totalCards,
           todayCardsIssued: todayCards,
           failedTransactions: failedCards,
@@ -97,18 +94,7 @@ export default function AdminDashboard() {
       </div>
     );
 
-  const cardsAvailable = 450 - stats.totalCardsIssued;
-  const inventoryPercent = Math.round((stats.totalCardsIssued / 450) * 100);
-
   const kpis = [
-    {
-      label: "TOTAL EMPLOYEES",
-      value: stats.totalEmployees,
-      icon: Users,
-      color: "text-purple-600",
-      bg: "bg-purple-600/10",
-      ring: "ring-purple-500/10",
-    },
     {
       label: "CARDS ISSUED",
       value: stats.totalCardsIssued,
@@ -119,12 +105,12 @@ export default function AdminDashboard() {
     },
     {
       label: "DEVICE STATUS",
-      value: "ONLINE",
+      value: isOnline ? "ONLINE" : "OFFLINE",
       icon: Wifi,
-      color: "text-emerald-600",
-      bg: "bg-emerald-600/10",
-      ring: "ring-emerald-500/10",
-      isOnline: true,
+      color: isOnline ? "text-emerald-600" : "text-gray-400",
+      bg: isOnline ? "bg-emerald-600/10" : "bg-gray-100",
+      ring: isOnline ? "ring-emerald-500/10" : "ring-gray-400/10",
+      isOnline,
     },
   ];
 
@@ -145,18 +131,18 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50/50">
-      <div className="max-w-[1400px] mx-auto px-6 py-8 space-y-8">
+      <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6 md:space-y-8">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-[24px] font-bold text-gray-900 tracking-tight">
+            <h1 className="text-[26px] font-bold text-gray-900 tracking-tight">
               Dashboard
             </h1>
-            <p className="text-[13px] text-[#64748b] mt-0.5">
+            <p className="text-[14px] text-[#64748b] mt-0.5">
               K750 Card Management Overview
             </p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-[14px] text-gray-500">
             <Calendar className="w-4 h-4" />
             <span className="font-medium">
               {currentTime.toLocaleDateString("en-US", {
@@ -179,7 +165,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* KPI Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 md:gap-5">
           {kpis.map((kpi) => {
             const Icon = kpi.icon;
             return (
@@ -202,10 +188,10 @@ export default function AdminDashboard() {
                     </div>
                   )}
                 </div>
-                <div className="text-[28px] font-bold text-[#0f172a] leading-none">
+                <div className="text-[30px] font-bold text-[#0f172a] leading-none">
                   {kpi.value}
                 </div>
-                <div className="text-[11px] uppercase text-[#64748b] tracking-[0.05em] mt-2 font-semibold">
+                <div className="text-[12px] uppercase text-[#64748b] tracking-[0.05em] mt-2 font-semibold">
                   {kpi.label}
                 </div>
 
@@ -215,7 +201,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
           {/* Recent Activity Panel */}
           <div className="lg:col-span-2 bg-white rounded-lg border border-[#e2e8f0] overflow-hidden">
             <div className="flex items-center justify-between px-6 py-5 border-b border-[#e2e8f0]">
@@ -224,17 +210,17 @@ export default function AdminDashboard() {
                   <Activity className="w-4 h-4 text-blue-600" />
                 </div>
                 <div>
-                  <h2 className="text-[15px] font-semibold text-[#0f172a]">
+                  <h2 className="text-[16px] font-semibold text-[#0f172a]">
                     Recent Activity
                   </h2>
-                  <p className="text-[12px] text-[#64748b]">
+                  <p className="text-[13px] text-[#64748b]">
                     Latest card issue transactions
                   </p>
                 </div>
               </div>
               <a
                 href="/admin/logs"
-                className="flex items-center gap-1.5 text-[13px] font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                className="flex items-center gap-1.5 text-[14px] font-medium text-blue-600 hover:text-blue-700 transition-colors"
               >
                 View All
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -247,22 +233,22 @@ export default function AdminDashboard() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-[13px]">
+                <table className="w-full text-[14px]">
                   <thead>
                     <tr className="border-b border-[#e2e8f0] bg-gray-50/50">
-                      <th className="text-left py-3 px-5 text-[11px] font-semibold text-[#64748b] uppercase tracking-[0.05em]">
+                      <th className="text-left py-3.5 px-5 text-[12px] font-semibold text-[#64748b] uppercase tracking-[0.05em]">
                         Employee
                       </th>
-                      <th className="text-left py-3 px-5 text-[11px] font-semibold text-[#64748b] uppercase tracking-[0.05em] hidden sm:table-cell">
+                      <th className="text-left py-3.5 px-5 text-[12px] font-semibold text-[#64748b] uppercase tracking-[0.05em] hidden sm:table-cell">
                         Department
                       </th>
-                      <th className="text-left py-3 px-5 text-[11px] font-semibold text-[#64748b] uppercase tracking-[0.05em] hidden md:table-cell">
+                      <th className="text-left py-3.5 px-5 text-[12px] font-semibold text-[#64748b] uppercase tracking-[0.05em] hidden md:table-cell">
                         Issued By
                       </th>
-                      <th className="text-left py-3 px-5 text-[11px] font-semibold text-[#64748b] uppercase tracking-[0.05em]">
+                      <th className="text-left py-3.5 px-5 text-[12px] font-semibold text-[#64748b] uppercase tracking-[0.05em]">
                         Time
                       </th>
-                      <th className="text-left py-3 px-5 text-[11px] font-semibold text-[#64748b] uppercase tracking-[0.05em]">
+                      <th className="text-left py-3.5 px-5 text-[12px] font-semibold text-[#64748b] uppercase tracking-[0.05em]">
                         Status
                       </th>
                     </tr>
@@ -273,18 +259,18 @@ export default function AdminDashboard() {
                         key={r.id}
                         className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors"
                       >
-                        <td className="py-3 px-5">
+                        <td className="py-3.5 px-5">
                           <span className="font-semibold text-[#0f172a]">
                             {r.employeeName}
                           </span>
                         </td>
-                        <td className="py-3 px-5 text-gray-500 hidden sm:table-cell">
+                        <td className="py-3.5 px-5 text-gray-500 hidden sm:table-cell">
                           {r.department}
                         </td>
-                        <td className="py-3 px-5 text-gray-500 hidden md:table-cell">
+                        <td className="py-3.5 px-5 text-gray-500 hidden md:table-cell">
                           {r.issuedBy}
                         </td>
-                        <td className="py-3 px-5 text-gray-500 font-mono text-[12px]">
+                        <td className="py-3.5 px-5 text-gray-500 font-mono text-[13px]">
                           {(() => {
                             const d = toDate(r.issuedAt);
                             return d
@@ -292,9 +278,9 @@ export default function AdminDashboard() {
                               : "N/A";
                           })()}
                         </td>
-                        <td className="py-3 px-5">
+                        <td className="py-3.5 px-5">
                           <span
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getStatusBadge(
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-semibold ${getStatusBadge(
                               r.status
                             )}`}
                           >
@@ -325,10 +311,10 @@ export default function AdminDashboard() {
                 <Wifi className="w-4 h-4 text-emerald-600" />
               </div>
               <div>
-                <h2 className="text-[15px] font-semibold text-[#0f172a]">
+                <h2 className="text-[16px] font-semibold text-[#0f172a]">
                   Device Status
                 </h2>
-                <p className="text-[12px] text-[#64748b]">
+                <p className="text-[13px] text-[#64748b]">
                   K750 Card Dispenser
                 </p>
               </div>
@@ -342,10 +328,10 @@ export default function AdminDashboard() {
                     <Wifi className="w-5 h-5 text-emerald-600" />
                   </div>
                   <div>
-                    <p className="text-[14px] font-bold text-[#0f172a]">
+                    <p className="text-[15px] font-bold text-[#0f172a]">
                       K750-001
                     </p>
-                    <p className="text-[12px] text-[#64748b]">
+                    <p className="text-[13px] text-[#64748b]">
                       Primary Dispenser
                     </p>
                   </div>
@@ -361,68 +347,36 @@ export default function AdminDashboard() {
 
               {/* Device Details */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                  <span className="text-[12px] text-[#64748b] font-medium">
+                <div className="flex items-center justify-between py-2.5 border-b border-gray-100">
+                  <span className="text-[13px] text-[#64748b] font-medium">
                     Connection
                   </span>
-                  <span className="text-[13px] font-semibold text-[#0f172a]">
+                  <span className="text-[14px] font-semibold text-[#0f172a]">
                     USB Serial
                   </span>
                 </div>
-                <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                  <span className="text-[12px] text-[#64748b] font-medium">
+                <div className="flex items-center justify-between py-2.5 border-b border-gray-100">
+                  <span className="text-[13px] text-[#64748b] font-medium">
                     Last Response
                   </span>
-                  <span className="text-[13px] font-semibold text-emerald-600">
+                  <span className="text-[14px] font-semibold text-emerald-600">
                     1.2s ago
                   </span>
                 </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-[12px] text-[#64748b] font-medium">
+                <div className="flex items-center justify-between py-2.5">
+                  <span className="text-[13px] text-[#64748b] font-medium">
                     Firmware
                   </span>
-                  <span className="text-[13px] font-semibold text-[#0f172a]">
+                  <span className="text-[14px] font-semibold text-[#0f172a]">
                     v2.4.1
                   </span>
-                </div>
-              </div>
-
-              {/* Card Inventory */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[12px] text-[#64748b] font-medium">
-                    Card Inventory
-                  </span>
-                  <span className="text-[13px] font-bold text-[#0f172a]">
-                    {stats.totalCardsIssued}/450
-                  </span>
-                </div>
-                <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-700 ${
-                      inventoryPercent > 90
-                        ? "bg-red-500"
-                        : inventoryPercent > 70
-                        ? "bg-amber-500"
-                        : "bg-emerald-500"
-                    }`}
-                    style={{ width: `${inventoryPercent}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between mt-1.5">
-                  <p className="text-[11px] text-gray-400">
-                    {inventoryPercent}% utilized
-                  </p>
-                  <p className="text-[11px] text-gray-400">
-                    {cardsAvailable} remaining
-                  </p>
                 </div>
               </div>
 
               {/* View Device Link */}
               <a
                 href="/admin/device"
-                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg border border-[#e2e8f0] text-[13px] font-semibold text-[#0f172a] hover:bg-gray-50 hover:border-gray-300 transition-all"
+                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg border border-[#e2e8f0] text-[14px] font-semibold text-[#0f172a] hover:bg-gray-50 hover:border-gray-300 transition-all"
               >
                 <Eye className="w-4 h-4" />
                 View Device

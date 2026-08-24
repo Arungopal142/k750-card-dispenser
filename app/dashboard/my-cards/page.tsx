@@ -24,7 +24,7 @@ export default function MyCardsPage() {
     fetchCards();
     const interval = setInterval(fetchCards, 10000);
     return () => clearInterval(interval);
-  }, [user, profile]);
+  }, [user]);
 
   const stats = useMemo(() => {
     const issued = cards.filter((c) => c.status === "Issued").length;
@@ -41,9 +41,9 @@ export default function MyCardsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900" style={{ fontWeight: 700 }}>My Cards</h1>
+            <h1 className="text-[26px] font-bold text-gray-900" style={{ fontWeight: 700 }}>My Cards</h1>
           <p className="text-[13px]" style={{ color: "#64748b" }}>View and collect issued cards</p>
         </div>
         <div className="flex items-center gap-2">
@@ -62,14 +62,14 @@ export default function MyCardsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
         <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-5 flex items-center gap-4">
           <div className="flex items-center justify-center w-11 h-11 rounded-lg" style={{ backgroundColor: "#eff6ff" }}>
             <CreditCard className="w-5 h-5" style={{ color: "#3b82f6" }} />
           </div>
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>Issued</p>
-            <p className="text-2xl font-bold text-gray-900">{stats.issued}</p>
+            <p className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>Issued</p>
+            <p className="text-[28px] font-bold text-gray-900">{stats.issued}</p>
           </div>
         </div>
         <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-5 flex items-center gap-4">
@@ -77,8 +77,8 @@ export default function MyCardsPage() {
             <CheckCircle className="w-5 h-5" style={{ color: "#22c55e" }} />
           </div>
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>Collected</p>
-            <p className="text-2xl font-bold text-gray-900">{stats.collected}</p>
+            <p className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>Collected</p>
+            <p className="text-[28px] font-bold text-gray-900">{stats.collected}</p>
           </div>
         </div>
         <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-5 flex items-center gap-4">
@@ -86,8 +86,8 @@ export default function MyCardsPage() {
             <Package className="w-5 h-5" style={{ color: "#eab308" }} />
           </div>
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>Processing</p>
-            <p className="text-2xl font-bold text-gray-900">{stats.processing}</p>
+            <p className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>Processing</p>
+            <p className="text-[28px] font-bold text-gray-900">{stats.processing}</p>
           </div>
         </div>
       </div>
@@ -101,51 +101,51 @@ export default function MyCardsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-[14px]">
               <thead>
                 <tr className="border-b border-gray-200 text-gray-500 bg-gray-50/50">
-                  <th className="text-left py-3 px-4 font-semibold">Employee ID</th>
-                  <th className="text-left py-3 px-4 font-semibold">Name</th>
-                  <th className="text-left py-3 px-4 font-semibold hidden sm:table-cell">Department</th>
-                  <th className="text-left py-3 px-4 font-semibold hidden md:table-cell">Email</th>
-                  <th className="text-left py-3 px-4 font-semibold hidden md:table-cell">Phone</th>
-                  <th className="text-left py-3 px-4 font-semibold">Date</th>
-                  <th className="text-left py-3 px-4 font-semibold">Status</th>
-                  <th className="text-left py-3 px-4 font-semibold">Action</th>
+                  <th className="text-left py-3.5 px-5 font-semibold">Employee ID</th>
+                  <th className="text-left py-3.5 px-5 font-semibold">Name</th>
+                  <th className="text-left py-3.5 px-5 font-semibold hidden sm:table-cell">Department</th>
+                  <th className="text-left py-3.5 px-5 font-semibold hidden md:table-cell">Email</th>
+                  <th className="text-left py-3.5 px-5 font-semibold hidden md:table-cell">Phone</th>
+                  <th className="text-left py-3.5 px-5 font-semibold">Date</th>
+                  <th className="text-left py-3.5 px-5 font-semibold">Status</th>
+                  <th className="text-left py-3.5 px-5 font-semibold">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {cards.map((c) => (
                   <tr key={c.id} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
-                    <td className="py-3 px-4 font-mono text-gray-900">{c.employeeId}</td>
-                    <td className="py-3 px-4 text-gray-900 font-medium">{c.employeeName}</td>
-                    <td className="py-3 px-4 text-gray-600 hidden sm:table-cell">{c.department}</td>
-                    <td className="py-3 px-4 text-gray-600 hidden md:table-cell">{c.email || "-"}</td>
-                    <td className="py-3 px-4 text-gray-600 hidden md:table-cell">{c.phone || "-"}</td>
-                    <td className="py-3 px-4 text-gray-600">
+                    <td className="py-3.5 px-5 font-mono text-gray-900">{c.employeeId}</td>
+                    <td className="py-3.5 px-5 text-gray-900 font-medium">{c.employeeName}</td>
+                    <td className="py-3.5 px-5 text-gray-600 hidden sm:table-cell">{c.department}</td>
+                    <td className="py-3.5 px-5 text-gray-600 hidden md:table-cell">{c.email || "-"}</td>
+                    <td className="py-3.5 px-5 text-gray-600 hidden md:table-cell">{c.phone || "-"}</td>
+                    <td className="py-3.5 px-5 text-gray-600">
                       {formatDateTime(c.issuedAt)}
                     </td>
-                    <td className="py-3 px-4">
+                    <td className="py-3.5 px-5">
                       {c.status === "Collected" || c.checkoutAt ? (
-                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
                           Collected
                         </span>
                       ) : c.status === "Processing" ? (
-                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold bg-yellow-50 text-yellow-700 border border-yellow-200">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-yellow-50 text-yellow-700 border border-yellow-200">
                           Processing
                         </span>
                       ) : c.status === "Failed" ? (
-                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200">
                           Failed
                         </span>
                       ) : (
-                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold bg-green-50 text-green-700 border border-green-200">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-green-50 text-green-700 border border-green-200">
                           Issued
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-4">
-                      <span className="text-[10px] text-gray-400">—</span>
+                    <td className="py-3.5 px-5">
+                      <span className="text-[11px] text-gray-400">—</span>
                     </td>
                   </tr>
                 ))}
