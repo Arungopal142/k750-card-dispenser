@@ -31,6 +31,22 @@ export interface NfcReadResult {
   uidBytes?: number[];
 }
 
+/** Whether the contactless reader module itself is answering. */
+export type NfcReaderState = "disconnected" | "unknown" | "ready" | "error";
+
+/** What the reader currently sees at the read position. */
+export type NfcCardState = "none" | "present" | "detected" | "unreadable";
+
+export interface NfcState {
+  reader: NfcReaderState;
+  card: NfcCardState;
+  uid?: string;
+  chipType?: NfcChipType;
+  /** Last thing that happened, for the subtitle line. */
+  message?: string;
+  updatedAt: number;
+}
+
 export interface NfcBlockResult {
   success: boolean;
   message: string;
@@ -123,6 +139,28 @@ export class K750Connection {
   private _reconnecting = false;
   private _deviceAddress = 0;
   private _fc1Supported: boolean | null = null;
+  private _nfcState: NfcState = { reader: "disconnected", card: "none", updatedAt: 0 };
+  private _nfcSawAnswer = false;
+
+  get nfcState(): NfcState { return this._nfcState; }
+
+  /**
+   * Merge a patch into the NFC state and notify listeners, but only when
+   * something actually changed — queryAP runs on a 1s timer and must not
+   * re-render the status panel on every tick.
+   */
+  private setNfcState(patch: Partial<Omit<NfcState, "updatedAt">>): void {
+    const next: NfcState = { ...this._nfcState, ...patch, updatedAt: Date.now() };
+    const same =
+      next.reader === this._nfcState.reader &&
+      next.card === this._nfcState.card &&
+      next.uid === this._nfcState.uid &&
+      next.chipType === this._nfcState.chipType &&
+      next.message === this._nfcState.message;
+    if (same) return;
+    this._nfcState = next;
+    this.onNfcStateChange?.(next);
+  }
 
   get isConnected(): boolean { return this._connected; }
   get isBusy() { return this._busy; }
@@ -131,6 +169,7 @@ export class K750Connection {
 
   onLog?: (entry: LogEntry) => void;
   onStatusChange?: (status: DeviceStatus | null) => void;
+  onNfcStateChange?: (state: NfcState) => void;
   onConnectionChange?: (state: ConnectionState) => void;
   onAutoReconnect?: () => void;
 
@@ -194,6 +233,7 @@ export class K750Connection {
           this.log("INFO", [], "USB DISCONNECTED");
           this._connected = false;
           this.readerActive = false;
+          this.setNfcState({ reader: "disconnected", card: "none", uid: undefined, chipType: undefined, message: undefined });
           this.onConnectionChange?.("error");
           this.onStatusChange?.(null);
           if (!this._manualDisconnect && this._autoReconnect) {
@@ -213,6 +253,7 @@ export class K750Connection {
       } catch { /* not USB */ }
 
       this.startReaderLoop();
+      this.setNfcState({ reader: "unknown", card: "none", uid: undefined, chipType: undefined, message: undefined });
       this.onConnectionChange?.("connected");
       this.log("INFO", [], "Connected - reader loop started");
 
@@ -303,6 +344,7 @@ export class K750Connection {
       this.disconnectHandler = undefined;
     }
     await this.releasePort();
+    this.setNfcState({ reader: "disconnected", card: "none", uid: undefined, chipType: undefined, message: undefined });
     this.onConnectionChange?.("disconnected");
     this.onStatusChange?.(null);
     this.log("INFO", [], "Disconnected");
@@ -507,9 +549,27 @@ export class K750Connection {
       if (!statusBytes) return null;
       this.log("INFO", [], `AP parse: B1=0x${statusBytes.byte1.toString(16).padStart(2, "0")} B2=0x${statusBytes.byte2.toString(16).padStart(2, "0")} B3=0x${statusBytes.byte3.toString(16).padStart(2, "0")} B4=0x${statusBytes.byte4.toString(16).padStart(2, "0")}`);
       const deviceStatus: DeviceStatus = { raw: statusBytes, flags: getStatusFlags(statusBytes), hex: bytesToHex(resp) };
+      this.trackCardPresence(deviceStatus);
       this.onStatusChange?.(deviceStatus);
       return deviceStatus;
     } catch { return null; }
+  }
+
+  /**
+   * Keep the NFC card state in step with sensor 3, which is the read position.
+   * A card leaving the reader invalidates any UID we read from it; a card
+   * arriving is "present" until something actually reads it.
+   */
+  private trackCardPresence(status: DeviceStatus): void {
+    if (!status.flags.cardAtSensor3) {
+      if (this._nfcState.card !== "none") {
+        this.setNfcState({ card: "none", uid: undefined, chipType: undefined, message: undefined });
+      }
+      return;
+    }
+    if (this._nfcState.card === "none") {
+      this.setNfcState({ card: "present", message: "Card at reader — not read yet" });
+    }
   }
 
   setAddress(addr: number): void {
@@ -693,6 +753,7 @@ export class K750Connection {
         flags: getStatusFlags(statusBytes),
         hex: bytesToHex(resp),
       };
+      this.trackCardPresence(status);
       this.onStatusChange?.(status);
       return status;
     } catch { return null; }
@@ -753,7 +814,10 @@ export class K750Connection {
   /** Run one contactless command and decode its P/N response frame. */
   private async nfcTransact(packet: Uint8Array, chip: NfcChipType, pm: number) {
     const resp = await this.transact(packet, true);
+    // Any framed reply — including an error frame — proves the contactless
+    // module is alive. Silence is what marks the reader as failed.
     if (!resp) return null;
+    this._nfcSawAnswer = true;
     return parseCardResponse(resp, chipCommandCode(chip), pm);
   }
 
@@ -844,9 +908,12 @@ export class K750Connection {
     if (requireCardAtReader) {
       if (!settled) return { success: false, message: "No response from device." };
       if (!settled.flags.cardAtSensor3) {
+        this.setNfcState({ card: "none", uid: undefined, chipType: undefined, message: "No card at the reader" });
         return { success: false, message: "No card at the reader position — dispense a card first." };
       }
     }
+
+    this._nfcSawAnswer = false;
     for (const chip of NFC_CHIP_TYPES) {
       const searchData = await this.nfcSearch(chip);
       if (searchData === null) continue;
@@ -874,11 +941,40 @@ export class K750Connection {
       const uid = bytesToHexCompact(uidBytes);
       this.log("INFO", [], `NFC ${chip}: UID ${uid}`);
       await this.nfcHalt(chip);
+      this.setNfcState({
+        reader: "ready",
+        card: "detected",
+        uid,
+        chipType: chip,
+        message: `${chip} card read`,
+      });
       return { success: true, message: `${chip} card — UID ${uid}`, chipType: chip, uid, uidBytes };
     }
 
     this.log("INFO", [], "NFC: no card detected (S50/S70/UL/TypeA all failed)");
-    return { success: false, message: "No NFC card detected at the reader." };
+    // The reader answered every search with a proper error frame, so the module
+    // works — there is just no chip it recognises in the field. Total silence
+    // instead means the contactless module is missing or broken.
+    if (this._nfcSawAnswer) {
+      this.setNfcState({
+        reader: "ready",
+        card: settled?.flags.cardAtSensor3 ? "unreadable" : "none",
+        uid: undefined,
+        chipType: undefined,
+        message: settled?.flags.cardAtSensor3
+          ? "Card at reader, but no chip answered"
+          : "No card at the reader",
+      });
+      return { success: false, message: "No NFC card detected at the reader." };
+    }
+    this.setNfcState({
+      reader: "error",
+      card: "none",
+      uid: undefined,
+      chipType: undefined,
+      message: "Reader did not respond",
+    });
+    return { success: false, message: "NFC reader did not respond." };
   }
 
   /**

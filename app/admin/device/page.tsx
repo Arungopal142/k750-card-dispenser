@@ -57,7 +57,7 @@ function SensorDot({ label, active }: { label: string; active: boolean }) {
 export default function DevicePage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const { conn, dispense, collect, connState, status, connect, disconnect } = useK750();
+  const { conn, dispense, collect, connState, status, nfc, connect, disconnect } = useK750();
   const [firmware, setFirmware] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -618,7 +618,7 @@ export default function DevicePage() {
                       {b4 & 0x08 ? (
                         <Badge label="Box EMPTY" color="red" />
                       ) : b4 & 0x04 ? (
-                        <Badge label="Reader (S3)" color="green" />
+                        <Badge label="At NFC reader (S3)" color="green" />
                       ) : (
                         <Badge label="Clear" color="green" />
                       )}
@@ -777,7 +777,7 @@ export default function DevicePage() {
                         borderLeft: "5px solid #cbd5e1",
                       }}
                     />
-                    <SensorDot label="S3" active={!!(b4 & 0x04)} />
+                    <SensorDot label="S3 · NFC" active={!!(b4 & 0x04)} />
                     <div
                       className="h-px w-3"
                       style={{ backgroundColor: "#cbd5e1" }}
@@ -797,6 +797,106 @@ export default function DevicePage() {
                       Bay
                     </div>
                   </div>
+                </div>
+
+                {/* NFC reader */}
+                <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
+                  <h4
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      color: "#64748b",
+                      marginBottom: 12,
+                    }}
+                  >
+                    NFC Reader (S3 position)
+                  </h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: "#64748b",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          fontWeight: 600,
+                        }}
+                      >
+                        NFC Reader
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {nfc.reader === "ready" ? (
+                          <Badge label="Ready" color="green" />
+                        ) : nfc.reader === "error" ? (
+                          <Badge label="Error" color="red" />
+                        ) : nfc.reader === "disconnected" ? (
+                          <Badge label="Disconnected" color="gray" />
+                        ) : (
+                          <Badge label="Connected" color="green" />
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: "#64748b",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Card Status
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {nfc.card === "detected" ? (
+                          <Badge label="Card Detected" color="green" />
+                        ) : nfc.card === "unreadable" ? (
+                          <Badge label="Unreadable" color="red" />
+                        ) : nfc.card === "present" ? (
+                          <Badge label="Reading..." color="yellow" />
+                        ) : (
+                          <Badge label="Waiting for Card" color="gray" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: "#64748b",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Card UID
+                    </div>
+                    <div
+                      className="mt-1.5"
+                      style={{
+                        backgroundColor: "#f1f5f9",
+                        borderRadius: 8,
+                        padding: "8px 12px",
+                        fontFamily: "monospace",
+                        fontSize: 13,
+                        color: nfc.uid ? "#0f172a" : "#94a3b8",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {nfc.uid ? `${nfc.uid}${nfc.chipType ? `  (${nfc.chipType})` : ""}` : "—"}
+                    </div>
+                  </div>
+
+                  {nfc.message && (
+                    <p style={{ fontSize: 11, color: "#64748b", marginTop: 8 }}>
+                      {nfc.message}
+                    </p>
+                  )}
                 </div>
 
                 {/* Raw Data */}

@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from "react";
-import { K750Connection, type ConnectionState, type DeviceStatus } from "./k750-connection";
+import { createContext, useContext, useState, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { K750Connection, type ConnectionState, type DeviceStatus, type NfcState } from "./k750-connection";
 import { DispenseService } from "./k750-dispense";
 import { CollectService } from "./k750-collect";
 import { ToastContext } from "./toast-context";
@@ -12,6 +12,7 @@ interface K750ContextValue {
   collect: CollectService;
   connState: ConnectionState;
   status: DeviceStatus | null;
+  nfc: NfcState;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
 }
@@ -48,10 +49,13 @@ export function K750Provider({ children }: { children: ReactNode }) {
     conn.isConnected ? "connected" : "disconnected"
   );
   const [status, setStatus] = useState<DeviceStatus | null>(null);
+  const [nfc, setNfc] = useState<NfcState>(conn.nfcState);
+  const autoReadRef = useRef(false);
 
   useEffect(() => {
     conn.onConnectionChange = setConnState;
     conn.onStatusChange = setStatus;
+    conn.onNfcStateChange = setNfc;
     conn.onAutoReconnect = () => {
       toastCtx?.toast("Device unresponsive — auto-reconnecting...", "warning");
     };
@@ -59,9 +63,29 @@ export function K750Provider({ children }: { children: ReactNode }) {
     return () => {
       conn.onConnectionChange = undefined;
       conn.onStatusChange = undefined;
+      conn.onNfcStateChange = undefined;
       conn.onAutoReconnect = undefined;
     };
   }, [toastCtx, conn]);
+
+  // Read the UID as soon as a card arrives at the reader, so the status panel
+  // shows a live result rather than waiting for someone to press a button.
+  // Skipped while a flow owns the device — the issue flow does its own read —
+  // and guarded so only one auto-read is in flight per card.
+  useEffect(() => {
+    if (connState !== "connected") return;
+    if (nfc.card !== "present") return;
+    if (autoReadRef.current) return;
+    if (conn.isBusy || dispense.isFlowBusy || collect.isFlowBusy) return;
+
+    autoReadRef.current = true;
+    conn
+      .readNfcCard({ requireCardAtReader: false })
+      .catch(() => { /* state is published by readNfcCard either way */ })
+      .finally(() => { autoReadRef.current = false; });
+    // `status` is in the deps so a poll that lands while a flow owns the device
+    // retries on the next tick instead of giving up on this card.
+  }, [connState, nfc.card, status, conn, dispense, collect]);
 
   const value = useMemo(
     () => ({
@@ -70,10 +94,11 @@ export function K750Provider({ children }: { children: ReactNode }) {
       collect,
       connState,
       status,
+      nfc,
       connect: async () => { try { await conn.connect(); } catch { /* */ } },
       disconnect: async () => { await conn.disconnect(); setStatus(null); },
     }),
-    [conn, dispense, collect, connState, status]
+    [conn, dispense, collect, connState, status, nfc]
   );
 
   return <K750Context.Provider value={value}>{children}</K750Context.Provider>;
