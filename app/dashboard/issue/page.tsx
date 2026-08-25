@@ -6,20 +6,21 @@ import { useAuth } from "../../../lib/auth-context";
 import { useK750, getK750Conn, getK750Dispense, getK750Collect } from "../../../lib/k750-context";
 import { ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
 import { CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
+import { READ_CARD_STEP_LABELS, type ReadCardResult } from "../../../lib/k750-readcard";
 import type { IssueResult } from "../../../lib/k750-dispense";
 import type { CollectResult } from "../../../lib/k750-collect";
 import type { LogEntry } from "../../../lib/k750-connection";
 import { logActivity, subscribeIssuedCards, subscribeAllCardIssues, returnCard, logCardIssue, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { useToast } from "../../../lib/toast-context";
-import { Loader2, CreditCard, RotateCcw, AlertTriangle, CheckCircle, XCircle, Wifi, WifiOff, UserPlus, LogOut, Terminal, Clock } from "lucide-react";
+import { Loader2, CreditCard, RotateCcw, AlertTriangle, CheckCircle, XCircle, Wifi, WifiOff, UserPlus, LogOut, Terminal, Clock, Nfc } from "lucide-react";
 
-type TabKey = "issue" | "exit";
+type TabKey = "issue" | "exit" | "read";
 
 export default function IssueCardPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
-  const { conn, dispense, collect, connState, status: deviceStatus, connect, disconnect } = useK750();
+  const { conn, dispense, collect, readCard, connState, status: deviceStatus, connect, disconnect } = useK750();
   const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabKey>("issue");
@@ -47,6 +48,12 @@ export default function IssueCardPage() {
   // --- Recycle Bin ---
   const [recycleCount, setRecycleCount] = useState(0);
   const RECYCLE_MAX = 13;
+
+  // --- Read Card state ---
+  const [readCardResult, setReadCardResult] = useState<ReadCardResult | null>(null);
+  const [readCardRunning, setReadCardRunning] = useState(false);
+  const [readCardStep, setReadCardStep] = useState(0);
+  const [readCardStepMsg, setReadCardStepMsg] = useState("");
 
   // --- Reset ---
   const [resetting, setResetting] = useState(false);
@@ -173,6 +180,28 @@ export default function IssueCardPage() {
     await conn.queryAP();
     setResetting(false);
     toast(ok ? "Device reset successful" : "Reset failed — no response", ok ? "success" : "error");
+  };
+
+  const handleReadCard = async () => {
+    if (readCardRunning || connState !== "connected") return;
+    setReadCardRunning(true);
+    setReadCardResult(null);
+    setReadCardStep(0);
+    setReadCardStepMsg("");
+    try {
+      const res = await readCard.readCard((step, _total, msg) => {
+        setReadCardStep(step);
+        setReadCardStepMsg(msg);
+      });
+      setReadCardResult(res);
+      toast(res.success ? `${res.cardType} — ${res.uid}` : res.message, res.success ? "success" : "error");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast(`Read Card error: ${msg}`, "error");
+    }
+    setReadCardRunning(false);
+    setReadCardStep(0);
+    setReadCardStepMsg("");
   };
 
   // ===== Issue Card: pre-check → FC0 (auto-clear) → FC7 → FC0 → FD3 =====
@@ -311,12 +340,15 @@ export default function IssueCardPage() {
   const channelNotice = hasCardInChannel
     ? activeTab === "issue"
       ? "A card is in the channel — it will be cleared automatically before dispensing."
+      : activeTab === "read"
+      ? "A card is in the channel — it will be cleared automatically before reading."
       : "Card in channel — clear it before starting a return."
     : null;
 
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     { key: "issue", label: "Issue Card", icon: <CreditCard className="w-4 h-4" /> },
     { key: "exit", label: "Card Return", icon: <LogOut className="w-4 h-4" /> },
+    { key: "read", label: "Read Card", icon: <Nfc className="w-4 h-4" /> },
   ];
 
   return (
@@ -529,6 +561,69 @@ export default function IssueCardPage() {
               {!selectedCard && !cardsError && issuedCards.length > 0 && (
                 <p className="text-xs text-gray-400 text-center">Select a card above to enable check out</p>
               )}
+            </>
+          )}
+
+          {/* ===== READ CARD TAB ===== */}
+          {activeTab === "read" && (
+            <>
+              <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-5 space-y-4">
+                <h2 className="text-[12px] font-semibold text-[#64748b] uppercase tracking-wider" style={{ fontSize: "12px" }}>NFC Card Reader</h2>
+                <p className="text-sm text-gray-500">
+                  Place a card on the reader (sensor S3) or let the machine dispense one automatically.
+                  The reader will probe MIFARE S50, S70, Ultralight, ISO15693, and TypeA chip families.
+                </p>
+
+                <button
+                  onClick={handleReadCard}
+                  disabled={connState !== "connected" || readCardRunning}
+                  className="w-full rounded-xl px-6 py-3 text-[14px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                  style={{ height: "48px", backgroundColor: "#6366f1" }}
+                >
+                  {readCardRunning ? <><Loader2 className="animate-spin h-4 w-4" /> Reading...</> : <><Nfc className="w-5 h-5" /> Read Card</>}
+                </button>
+
+                {readCardRunning && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-gray-600">
+                      <span className="font-mono font-bold text-indigo-600">{readCardStep}/{READ_CARD_STEP_LABELS.length}</span>
+                      <span>{readCardStepMsg}</span>
+                    </div>
+                    <div className="flex gap-1.5">
+                      {READ_CARD_STEP_LABELS.map((_, i) => (
+                        <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors ${i + 1 <= readCardStep ? "bg-indigo-500" : "bg-gray-200"}`} />
+                      ))}
+                    </div>
+                    <div className="flex justify-between">
+                      {READ_CARD_STEP_LABELS.map((label, i) => (
+                        <span key={label} className={`text-[9px] ${i + 1 <= readCardStep ? "text-indigo-600" : "text-gray-400"} ${i + 1 === readCardStep ? "font-semibold" : ""}`}>{label}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {readCardResult && (
+                  <div className="space-y-3">
+                    <div className={`rounded-xl p-4 text-sm font-medium flex items-start gap-3 animate-fade-in ${readCardResult.success ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
+                      {readCardResult.success ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : <XCircle className="w-5 h-5 flex-shrink-0" />}
+                      <span>{readCardResult.message}</span>
+                    </div>
+
+                    {readCardResult.success && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+                          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Chip Type</div>
+                          <div className="font-mono text-sm font-bold text-gray-900">{readCardResult.cardType}</div>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+                          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Card UID</div>
+                          <div className="font-mono text-sm font-bold text-gray-900 break-all">{readCardResult.uid}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </>
           )}
 
