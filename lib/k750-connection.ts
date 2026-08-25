@@ -7,7 +7,6 @@ import {
   buildFD2Packet, buildFD3Packet, buildFD4Packet, buildBEPacket, buildBDPacket,
   buildFC1Packet, buildFRPacket, addressBytes,
   buildRFPacket, buildFC2Packet, buildBFPacket, buildBGPacket,
-  buildTypeAActivatePacket, TYPEA_ACTIVATE_PROBES,
   buildCSPacket, buildLPPacket, buildLFPacket, type BaudRate,
   buildNfcSearchPacket, buildNfcSerialPacket, buildNfcAuthPacket,
   buildNfcReadBlockPacket, buildNfcHaltPacket,
@@ -848,22 +847,13 @@ export class K750Connection {
       if (res?.ok) return res.data;
       if (res && !res.ok) this.log("INFO", [], `NFC ${chip} search: ${res.errorName}`);
 
-      // 0x01 is "command parameter error", not a card-level failure — the
-      // device rejected the packet itself. Only TypeA does this, and only for
-      // the bare two-byte activate; probe the documented third byte so the
-      // comm log shows which value the firmware accepts.
+      // 0x01 is "command parameter error" — the device rejected the packet
+      // itself rather than failing to find a card. The vendor SDK sends this
+      // exact two-byte form (CM 0x47, PM 0x30, dataLen 0), so the packet is
+      // correct and the unit simply has no CPU/TypeA module fitted.
       if (chip === "TypeA" && res && !res.ok && res.errorCode === 0x01) {
-        for (const param of TYPEA_ACTIVATE_PROBES) {
-          const probe = await this.nfcTransact(
-            buildTypeAActivatePacket(param, this.addH, this.addL),
-            chip,
-            NFC_PM.TypeA.search
-          );
-          this.log("INFO", [], `NFC TypeA activate probe 0x${param.toString(16).padStart(2, "0")}: ${probe?.ok ? "ACCEPTED" : probe?.errorName ?? "no response"}`);
-          if (probe?.ok) return probe.data;
-          // A card-level error means the packet was well formed; stop probing.
-          if (probe && probe.errorCode !== 0x01) break;
-        }
+        this.log("INFO", [], "NFC TypeA: not supported by this unit (it rejected the vendor's own activate frame)");
+        return null;
       }
     }
     return null;

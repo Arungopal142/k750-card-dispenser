@@ -476,10 +476,15 @@ export function bytesToHex(data: Uint8Array | number[]): string {
 // Each command is CM (chip family) + PM (operation), framed exactly like the
 // movement commands, so buildPacket() is reused.
 //
-// Note: the PDF prints a few wrong SELEN values in this section (TypeA activate
-// is shown as len 0x03 for a 2-byte payload, UL close-down as 0x07).
-// buildPacket() always derives SELEN from the real payload length, which is
-// what the verified AP/FC7 vectors above do too.
+// Every CM/PM pair below is verified against the vendor Android SDK
+// (k7x0_dll.jar, class k7x0.k7x0). Its sendAndrecv() frames a command as
+//   buf[3..4] = SELEN = dataLen + 2      (CM + PM + any extra data)
+//   buf[5] = CM, buf[6] = PM, data from buf[7], then ETX and an XOR BCC,
+// which is exactly what buildPacket() derives from the payload length.
+//
+// The PDF prints SELEN 0x03 against the two-byte payloads in the TypeA section
+// and 0x07 for UL close-down. The JAR shows both are typos: every detect /
+// activate call passes dataLen 0, so SELEN is 2.
 // ---------------------------------------------------------------------------
 
 export const CM_S50 = 0x3b;
@@ -548,25 +553,6 @@ function buildNfcPacket(
 export function buildNfcSearchPacket(chip: NfcChipType, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
   return buildNfcPacket(chip, NFC_PM[chip].search, [], addH, addL);
 }
-
-/**
- * TypeA activate with an explicit parameter byte.
- *
- * The bare two-byte form (0x47 0x30) is what the DLL guide implies — its
- * K720_CPUCardPowerOn takes no input beyond the device address — but real
- * hardware answers NF 47 30 01 "Command parameter error" to it, while the same
- * firmware answers S50/S70/UL searches with a normal card-level 0x41. The
- * protocol doc prints SELEN 0x03 for every command in the TypeA section, which
- * is one more than the two bytes it then lists, so a third byte does look
- * expected. Its value is not documented anywhere in the reference set; this
- * exists so the fallback in nfcSearch() can probe for it against hardware.
- */
-export function buildTypeAActivatePacket(param: number, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
-  return buildNfcPacket("TypeA", NFC_PM.TypeA.search, [param & 0xff], addH, addL);
-}
-
-/** Parameter bytes tried, in order, when bare TypeA activate is rejected. */
-export const TYPEA_ACTIVATE_PROBES = [0x30, 0x00, 0x26] as const;
 
 /** Read card serial number (S50/S70: 4 bytes, UL: 7 bytes). Not valid for TypeA. */
 export function buildNfcSerialPacket(chip: "S50" | "S70" | "UL", addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
