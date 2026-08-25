@@ -6,6 +6,7 @@ import { useAuth } from "../../../lib/auth-context";
 import { useK750, getK750Conn, getK750Dispense, getK750Collect } from "../../../lib/k750-context";
 import { ISSUE_STEP_LABELS } from "../../../lib/k750-dispense";
 import { CHECKOUT_STEP_LABELS } from "../../../lib/k750-collect";
+import { READ_CARD_STEP_LABELS, type ReadCardResult } from "../../../lib/k750-readcard";
 import type { LogEntry } from "../../../lib/k750-connection";
 import { subscribeAllCardIssues, logCardIssue, updateCardIssue, logActivity, type CardIssue, formatDateTime } from "../../../lib/firestore-service";
 import { Loader2, RefreshCw, Wifi, WifiOff, CheckCircle2, XCircle, Info, ArrowDownFromLine, Hand, Terminal, CreditCard, CreditCard as CardIcon } from "lucide-react";
@@ -57,7 +58,7 @@ function SensorDot({ label, active }: { label: string; active: boolean }) {
 export default function DevicePage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const { conn, dispense, collect, connState, status, nfc, connect, disconnect } = useK750();
+  const { conn, dispense, collect, readCard, connState, status, nfc, connect, disconnect } = useK750();
   const [firmware, setFirmware] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -76,6 +77,33 @@ export default function DevicePage() {
   const [issueStepMsg, setIssueStepMsg] = useState("");
   const [issueResult, setIssueResult] = useState<{ success: boolean; message: string } | null>(null);
   const [nfcResult, setNfcResult] = useState<{ label: string; value: string } | null>(null);
+  // Read Card diagnostic (POC) — isolated from the issue/collect state above.
+  const [readCardResult, setReadCardResult] = useState<ReadCardResult | null>(null);
+  const [readCardRunning, setReadCardRunning] = useState(false);
+  const [readCardStep, setReadCardStep] = useState(0);
+  const [readCardStepMsg, setReadCardStepMsg] = useState("");
+
+  const handleReadCard = async () => {
+    if (readCardRunning) return;
+    setReadCardRunning(true);
+    setReadCardResult(null);
+    setReadCardStep(0);
+    setReadCardStepMsg("");
+    try {
+      const res = await readCard.readCard((step, _total, msg) => {
+        setReadCardStep(step);
+        setReadCardStepMsg(msg);
+      });
+      setReadCardResult(res);
+      showToast(res.success ? `${res.cardType} — ${res.uid}` : res.message, res.success ? "success" : "error");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(`Read Card error: ${msg}`, "error");
+    }
+    setReadCardRunning(false);
+    setReadCardStep(0);
+    setReadCardStepMsg("");
+  };
 
   // --- Issue Log ---
   const [issueLog, setIssueLog] = useState<CardIssue[]>([]);
@@ -1678,6 +1706,167 @@ export default function DevicePage() {
               </div>
             </div>
           </div>
+        </div>
+
+
+        {/* ===== READ CARD (DIAGNOSTIC POC) ===== */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            padding: 20,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+              Read Card (Diagnostic)
+            </h2>
+            <Badge
+              label={connState === "connected" ? "Device connected" : "Device disconnected"}
+              color={connState === "connected" ? "green" : "gray"}
+            />
+          </div>
+          <p style={{ fontSize: 11, color: "#64748b", marginBottom: 16 }}>
+            Moves a card to the reader with FC7 (skipped if one is already there),
+            then probes S50, S70, UL, ISO15693 and TypeA. The card is left at the
+            reader — use FC0 / DC / CP / DB above to clear it.
+          </p>
+
+          <div className="flex flex-wrap items-center gap-3" style={{ marginBottom: 16 }}>
+            <button
+              onClick={handleReadCard}
+              disabled={connState !== "connected" || readCardRunning}
+              style={{
+                backgroundColor: readCardRunning ? "#818cf8" : "#6366f1",
+                color: "#ffffff",
+                borderRadius: 8,
+                padding: "10px 20px",
+                fontSize: 13,
+                fontWeight: 600,
+                opacity: connState !== "connected" ? 0.5 : 1,
+              }}
+              className="hover:opacity-90 transition-opacity flex items-center gap-2 disabled:cursor-not-allowed"
+            >
+              {readCardRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+              {readCardRunning ? "Reading..." : "Read Card"}
+            </button>
+            {readCardRunning && (
+              <span style={{ fontSize: 12, color: "#64748b" }}>
+                <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#6366f1" }}>
+                  {readCardStep}/{READ_CARD_STEP_LABELS.length}
+                </span>{" "}
+                {readCardStepMsg}
+              </span>
+            )}
+          </div>
+
+          {readCardResult && (
+            <div className="space-y-4">
+              <div
+                style={{
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  backgroundColor: readCardResult.success ? "#f0fdf4" : "#fef2f2",
+                  border: `1px solid ${readCardResult.success ? "#bbf7d0" : "#fecaca"}`,
+                  color: readCardResult.success ? "#15803d" : "#b91c1c",
+                }}
+              >
+                {readCardResult.message}
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: "Card Type", value: readCardResult.cardType ?? "—" },
+                  { label: "Card UID", value: readCardResult.uid ?? "—" },
+                  { label: "Return Code", value: readCardResult.returnCode },
+                  { label: "FC7 Sent", value: readCardResult.movedWithFC7 ? "Yes" : "No (already at reader)" },
+                ].map(({ label, value }) => (
+                  <div key={label}>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: "#64748b",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {label}
+                    </div>
+                    <div
+                      className="mt-1.5"
+                      style={{
+                        backgroundColor: "#f1f5f9",
+                        borderRadius: 8,
+                        padding: "8px 12px",
+                        fontFamily: "monospace",
+                        fontSize: 12,
+                        color: "#0f172a",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "#64748b",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    fontWeight: 600,
+                    marginBottom: 6,
+                  }}
+                >
+                  Vendor communication log ({readCardResult.log.length} lines)
+                </div>
+                <div
+                  style={{
+                    backgroundColor: "#0f172a",
+                    borderRadius: 8,
+                    padding: 12,
+                    maxHeight: 260,
+                    overflowY: "auto",
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {readCardResult.log.map((entry, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8 }}>
+                      <span style={{ color: "#64748b", flexShrink: 0 }}>
+                        {new Date(entry.timestamp).toLocaleTimeString()}
+                      </span>
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          width: 34,
+                          color:
+                            entry.direction === "TX" ? "#38bdf8"
+                            : entry.direction === "RX" ? "#4ade80"
+                            : "#fbbf24",
+                        }}
+                      >
+                        {entry.direction}
+                      </span>
+                      <span style={{ color: "#e2e8f0", wordBreak: "break-all" }}>
+                        {entry.hex}
+                        {entry.text ? ` — ${entry.text}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ===== COMMUNICATION LOG ===== */}

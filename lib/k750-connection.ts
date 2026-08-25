@@ -11,7 +11,7 @@ import {
   buildCSPacket, buildLPPacket, buildLFPacket, type BaudRate,
   buildNfcSearchPacket, buildNfcSerialPacket, buildNfcAuthPacket,
   buildNfcReadBlockPacket, buildNfcHaltPacket,
-  chipCommandCode, parseCardResponse, NFC_PM, NFC_CHIP_TYPES,
+  chipCommandCode, parseCardResponse, NFC_PM, NFC_CHIP_TYPES, uidComesFromSearch,
   bytesToHex, bytesToHexCompact, parseNFResponse,
   parseAPStatusFromResponse, parseFC1Response, parseFRResponse,
   type NfcChipType,
@@ -168,6 +168,17 @@ export class K750Connection {
   get deviceAddress(): number { return this._deviceAddress; }
 
   onLog?: (entry: LogEntry) => void;
+
+  private logListeners = new Set<(entry: LogEntry) => void>();
+
+  /**
+   * Subscribe to the comm log without taking the single `onLog` slot, which
+   * CommLog and the device page already assign to. Returns an unsubscribe fn.
+   */
+  addLogListener(fn: (entry: LogEntry) => void): () => void {
+    this.logListeners.add(fn);
+    return () => { this.logListeners.delete(fn); };
+  }
   onStatusChange?: (status: DeviceStatus | null) => void;
   onNfcStateChange?: (state: NfcState) => void;
   onConnectionChange?: (state: ConnectionState) => void;
@@ -191,7 +202,11 @@ export class K750Connection {
 
   log(direction: "TX" | "RX" | "INFO", data: Uint8Array | number[], text?: string) {
     const hex = typeof data === "object" && "length" in data ? bytesToHex(data) : String(data);
-    this.onLog?.({ timestamp: Date.now(), direction, hex, text });
+    const entry: LogEntry = { timestamp: Date.now(), direction, hex, text };
+    this.onLog?.(entry);
+    for (const fn of this.logListeners) {
+      try { fn(entry); } catch { /* a listener must not break device I/O */ }
+    }
   }
 
   delay(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
@@ -885,8 +900,10 @@ export class K750Connection {
   }
 
   private async nfcHalt(chip: NfcChipType): Promise<void> {
+    const packet = buildNfcHaltPacket(chip, this.addH, this.addL);
+    if (!packet) return; // family has no close-down command
     try {
-      await this.transact(buildNfcHaltPacket(chip, this.addH, this.addL), true);
+      await this.transact(packet, true);
     } catch { /* halt is best-effort */ }
   }
 
@@ -918,9 +935,10 @@ export class K750Connection {
       const searchData = await this.nfcSearch(chip);
       if (searchData === null) continue;
 
-      // TypeA activate already returns the UID; the others need a serial read.
+      // TypeA activate and the ISO15693 content request already return the
+      // UID; the Mifare families need a separate read-serial command.
       let uidBytes: number[];
-      if (chip === "TypeA") {
+      if (uidComesFromSearch(chip)) {
         uidBytes = searchData;
       } else {
         const serial = await this.nfcTransact(

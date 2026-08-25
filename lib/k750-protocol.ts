@@ -486,17 +486,31 @@ export const CM_S50 = 0x3b;
 export const CM_S70 = 0x3c;
 export const CM_UL = 0x3d;
 export const CM_TYPEA = 0x47;
+export const CM_ISO15693 = 0x48;
 
-export type NfcChipType = "S50" | "S70" | "UL" | "TypeA";
+export type NfcChipType = "S50" | "S70" | "UL" | "TypeA" | "ISO15693";
 
 /** Chip families probed by readNfcCard(), in detection order. */
-export const NFC_CHIP_TYPES: NfcChipType[] = ["S50", "S70", "UL", "TypeA"];
+export const NFC_CHIP_TYPES: NfcChipType[] = ["S50", "S70", "UL", "ISO15693", "TypeA"];
+
+/** Families whose search/activate response already carries the UID, so there
+ *  is no separate read-serial command to send. */
+export const UID_FROM_SEARCH: NfcChipType[] = ["TypeA", "ISO15693"];
+
+/** Families that answer a separate read-serial command. */
+export type SerialChipType = "S50" | "S70" | "UL";
+
+/** Type guard so callers narrow to the family that needs a serial read. */
+export function uidComesFromSearch(chip: NfcChipType): chip is "TypeA" | "ISO15693" {
+  return UID_FROM_SEARCH.includes(chip);
+}
 
 const CHIP_CM: Record<NfcChipType, number> = {
   S50: CM_S50,
   S70: CM_S70,
   UL: CM_UL,
   TypeA: CM_TYPEA,
+  ISO15693: CM_ISO15693,
 };
 
 export function chipCommandCode(chip: NfcChipType): number {
@@ -510,7 +524,15 @@ export const NFC_PM = {
   S70: { search: 0x30, serial: 0x31, auth: 0x32, read: 0x33, halt: 0x38 },
   UL: { search: 0x30, serial: 0x31, read: 0x32, halt: 0x34 },
   TypeA: { search: 0x30, halt: 0x35 },
+  // ISO15693 "content request" (0x48 0x30) answers with the 8-byte UID
+  // directly. The family has no close-down command in the protocol doc.
+  ISO15693: { search: 0x30 },
 } as const;
+
+/** Halt PM for the families that have one. */
+export function nfcHaltPm(chip: NfcChipType): number | undefined {
+  return (NFC_PM[chip] as { halt?: number }).halt;
+}
 
 function buildNfcPacket(
   chip: NfcChipType,
@@ -576,9 +598,12 @@ export function buildNfcReadBlockPacket(
   return buildNfcPacket(chip, NFC_PM[chip].read, [blockAddr & 0xff], addH, addL);
 }
 
-/** Close down / halt the card so the RF field is released. */
-export function buildNfcHaltPacket(chip: NfcChipType, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array {
-  return buildNfcPacket(chip, NFC_PM[chip].halt, [], addH, addL);
+/** Close down / halt the card so the RF field is released.
+ *  Returns null for families with no such command (ISO15693). */
+export function buildNfcHaltPacket(chip: NfcChipType, addH = DEFAULT_ADDH, addL = DEFAULT_ADDL): Uint8Array | null {
+  const pm = nfcHaltPm(chip);
+  if (pm === undefined) return null;
+  return buildNfcPacket(chip, pm, [], addH, addL);
 }
 
 export interface CardResponse {
@@ -608,7 +633,14 @@ export function parseCardResponse(response: number[], cm: number, pm: number): C
   if (payload[1] !== cm || payload[2] !== pm) return null;
   if (kind === 0x4e) {
     const code = payload[3] ?? 0;
-    return { ok: false, cm, pm, data: [], errorCode: code, errorName: decodeErrorCode(code) };
+    // The 15693 family can answer with a two-byte error (SELEN 5) per the doc's
+    // "Response error definition"; keep the second byte visible.
+    const extra = len >= 5 ? payload[4] : undefined;
+    const errorName =
+      extra === undefined
+        ? decodeErrorCode(code)
+        : `${decodeErrorCode(code)} (15693 code 0x${code.toString(16).padStart(2, "0")}${extra.toString(16).padStart(2, "0")})`;
+    return { ok: false, cm, pm, data: [], errorCode: code, errorName };
   }
   return { ok: true, cm, pm, data: payload.slice(3) };
 }

@@ -4,12 +4,14 @@ import { createContext, useContext, useState, useEffect, useMemo, useRef, type R
 import { K750Connection, type ConnectionState, type DeviceStatus, type NfcState } from "./k750-connection";
 import { DispenseService } from "./k750-dispense";
 import { CollectService } from "./k750-collect";
+import { ReadCardService } from "./k750-readcard";
 import { ToastContext } from "./toast-context";
 
 interface K750ContextValue {
   conn: K750Connection;
   dispense: DispenseService;
   collect: CollectService;
+  readCard: ReadCardService;
   connState: ConnectionState;
   status: DeviceStatus | null;
   nfc: NfcState;
@@ -22,12 +24,14 @@ const K750Context = createContext<K750ContextValue | null>(null);
 let sharedConn: K750Connection | null = null;
 let sharedDispense: DispenseService | null = null;
 let sharedCollect: CollectService | null = null;
+let sharedReadCard: ReadCardService | null = null;
 
 function getSharedServices() {
   if (!sharedConn) sharedConn = new K750Connection();
   if (!sharedDispense) sharedDispense = new DispenseService(sharedConn);
   if (!sharedCollect) sharedCollect = new CollectService(sharedConn);
-  return { conn: sharedConn, dispense: sharedDispense, collect: sharedCollect };
+  if (!sharedReadCard) sharedReadCard = new ReadCardService(sharedConn);
+  return { conn: sharedConn, dispense: sharedDispense, collect: sharedCollect, readCard: sharedReadCard };
 }
 
 export function getK750Conn(): K750Connection {
@@ -42,8 +46,12 @@ export function getK750Collect(): CollectService {
   return getSharedServices().collect;
 }
 
+export function getK750ReadCard(): ReadCardService {
+  return getSharedServices().readCard;
+}
+
 export function K750Provider({ children }: { children: ReactNode }) {
-  const { conn, dispense, collect } = getSharedServices();
+  const { conn, dispense, collect, readCard } = getSharedServices();
   const toastCtx = useContext(ToastContext);
   const [connState, setConnState] = useState<ConnectionState>(
     conn.isConnected ? "connected" : "disconnected"
@@ -76,7 +84,7 @@ export function K750Provider({ children }: { children: ReactNode }) {
     if (connState !== "connected") return;
     if (nfc.card !== "present") return;
     if (autoReadRef.current) return;
-    if (conn.isBusy || dispense.isFlowBusy || collect.isFlowBusy) return;
+    if (conn.isBusy || dispense.isFlowBusy || collect.isFlowBusy || readCard.isBusy) return;
 
     autoReadRef.current = true;
     conn
@@ -85,20 +93,21 @@ export function K750Provider({ children }: { children: ReactNode }) {
       .finally(() => { autoReadRef.current = false; });
     // `status` is in the deps so a poll that lands while a flow owns the device
     // retries on the next tick instead of giving up on this card.
-  }, [connState, nfc.card, status, conn, dispense, collect]);
+  }, [connState, nfc.card, status, conn, dispense, collect, readCard]);
 
   const value = useMemo(
     () => ({
       conn,
       dispense,
       collect,
+      readCard,
       connState,
       status,
       nfc,
       connect: async () => { try { await conn.connect(); } catch { /* */ } },
       disconnect: async () => { await conn.disconnect(); setStatus(null); },
     }),
-    [conn, dispense, collect, connState, status, nfc]
+    [conn, dispense, collect, readCard, connState, status, nfc]
   );
 
   return <K750Context.Provider value={value}>{children}</K750Context.Provider>;
